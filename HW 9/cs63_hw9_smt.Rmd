@@ -1,0 +1,223 @@
+---
+title: "CSCI E-63C Week 9 Problem Set"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(MASS)
+library(class)
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preface
+
+For this week problem set we will use banknote authentication data (the one we worked with on week 2) to fit logistics regression model and evaluate performance of LDA, QDA and KNN classifiers.  As we have seen earlier this dataset should allow to predict fairly well which banknotes are authentic and which ones are forged, so we should expect to see low error rates for our classifiers.  Let's see whether some of those tools perform better than others on this data.
+
+# Problem 1 (10 points): logistic regression
+
+Fit logistic regression model of the class attribute using remaining four attributes as predictors in the model.  Produce summary of the model, describe which attributes appear to be significantly associated with the categorical outcome in this model.  Use this model to make predictions on the entire dataset and compare these predictions and corresponding true values of the class attribute using confusion matrix (i.e. contingency table).  Calculate error rate (would this be training or test error in this case?), sensitivity and specificity (assuming that we are predicting class "1").  Describe the results.
+
+``` {r readBanknoteData}
+bankNote <- read.table("data_banknote_authentication.txt", sep = ",")
+colnames(bankNote) <- c(
+  "imgVar",
+  "imgSkew",
+  "imgKurt",
+  "imgEnt",
+  "class"
+)
+bankNote$class <- as.factor(bankNote$class)
+```
+
+``` {r logisticRegression}
+lrFit <- glm(class ~ ., data = bankNote, family = binomial)
+summary(lrFit)
+```
+
+It appears that all of the factors except for entropy are significant.
+
+``` {r predictLRAndCM}
+lrPredict <- predict(lrFit, type = "response")
+lrCM <- table(bankNote$class, round(lrPredict))
+print(lrCM)
+```
+
+``` {r LRErrorSpecificitySensitivity}
+lrError <- (lrCM["0", "1"] + lrCM["1", "0"]) / sum(lrCM)
+print(paste("The error rate is", lrError))
+
+lrSpecificity <- lrCM["0", "0"] / (lrCM["0", "0"] + lrCM["1", "0"])
+print(paste("The specificity is", lrSpecificity))
+
+lrSensitivity <- lrCM["1", "1"] / (lrCM["1", "1"] + lrCM["0", "1"])
+print(paste("The sensitivity is", lrSensitivity))
+```
+
+In this case, we are evaluating training error. It appears the logistic regression model performs very well on in-sample predictions.
+
+# Problem 2 (10 points): LDA and QDA
+
+Using LDA and QDA implementations available in the package `MASS`, fit LDA and QDA classifiers on the entire dataset and calculate confusion matrix, (training) error rate, sensitivity and specificity for each of them.  Compare them to those of logistic regression.  Describe the results.
+
+``` {r LDAFit}
+ldaFit <- lda(class ~ ., data = bankNote)
+ldaFit
+```
+
+``` {r predictLDAAndCM}
+ldaPredict <- predict(ldaFit)
+ldaCM <- table(bankNote$class, as.numeric(predict(ldaFit)$x > 0))
+print(ldaCM)
+```
+
+``` {r LDAErrorSpecificitySensitivity}
+ldaError <- (ldaCM["0", "1"] + ldaCM["1", "0"]) / sum(ldaCM)
+print(paste("The error rate is", ldaError))
+
+ldaSpecificity <- ldaCM["0", "0"] / (ldaCM["0", "0"] + ldaCM["1", "0"])
+print(paste("The specificity is", ldaSpecificity))
+
+ldaSensitivity <- ldaCM["1", "1"] / (ldaCM["1", "1"] + ldaCM["0", "1"])
+print(paste("The sensitivity is", ldaSensitivity))
+```
+
+``` {r QDAFit}
+qdaFit <- qda(class ~ ., data = bankNote)
+qdaFit
+```
+
+``` {r predictLDAAndCM}
+qdaPredict <- predict(qdaFit)
+qdaCM <- table(bankNote$class, predict(qdaFit)$class)
+print(qdaCM)
+```
+
+``` {r LDAErrorSpecificitySensitivity}
+qdaError <- (qdaCM["0", "1"] + qdaCM["1", "0"]) / sum(qdaCM)
+print(paste("The error rate is", qdaError))
+
+qdaSpecificity <- qdaCM["0", "0"] / (qdaCM["0", "0"] + qdaCM["1", "0"])
+print(paste("The specificity is", qdaSpecificity))
+
+qdaSensitivity <- qdaCM["1", "1"] / (qdaCM["1", "1"] + qdaCM["0", "1"])
+print(paste("The sensitivity is", qdaSensitivity))
+```
+
+# Problem 3 (10 points): KNN
+
+Using `knn` from library `class`, fit KNN classifiers for the entire dataset and calculate confusion matrix, (training) error rate, sensitivity/specificity for  $k=1$, $7$ and $23$ nearest neighbors models.  Compare them to the corresponding results from LDA, QDA and logistic regression. Describe results of this comparison and discuss whether it is surprising to see low *training* error for KNN classifier with $k=1$.
+
+``` {r knnFit}
+knnFit.1 <- knn(select(bankNote, -class), test = select(bankNote, -class), 
+                cl = bankNote$class, k = 1)
+knnFit.7 <- knn(select(bankNote, -class), test = select(bankNote, -class), 
+                cl = bankNote$class, k = 7)
+knnFit.23 <- knn(select(bankNote, -class), test = select(bankNote, -class), 
+                 cl = bankNote$class, k = 23)
+```
+
+``` {r knnCM}
+knnCM.1 <- table(bankNote$class, knnFit.1)
+knnCM.7 <- table(bankNote$class, knnFit.7)
+knnCM.23 <- table(bankNote$class, knnFit.23)
+
+print(knnCM.1)
+print(knnCM.7)
+print(knnCM.23)
+```
+
+``` {r knnErrorSensitivitySpecificity}
+cms <- list(knnCM.1, knnCM.7, knnCM.23)
+for (cm in cms) {
+  knnError <- (cm["0", "1"] + cm["1", "0"]) / sum(cm)
+  print(paste("The error rate is", knnError))
+  
+  knnError <- cm["0", "0"] / (cm["0", "0"] + cm["1", "0"])
+  print(paste("The specificity is", knnError))
+  
+  knnError <- cm["1", "1"] / (cm["1", "1"] + cm["0", "1"])
+  print(paste("The sensitivity is", knnError))
+}
+
+```
+
+# Problem 4 (30 points): compare test errors of logistic regression, LDA, QDA and KNN
+
+Using resampling approach of your choice (e.g. cross-validation, bootstrap, etc.) obtain test error as well as sensitivity and specificity for each of these methods (logistic regression, LDA, QDA, KNN with $k=1,2,5,11,21,51,101$).  Present results in the form of boxplots, compare test error/sensitivity/specificity across these methods and discuss their relative performance.
+
+``` {r crossValidate}
+k <- 20
+nns <- c(1, 2, 5, 11, 21, 51, 101)
+kfInd <- sample(rep(c(1:k),length.out=nrow(bankNote)))
+xvalResults <- tibble()
+
+bundleStats <- function(confusion_matrix, classifier_name, fold) {
+  classError <- (confusion_matrix["0", "1"] + confusion_matrix["1", "0"]) / 
+    sum(confusion_matrix)
+  classSpecificity <- confusion_matrix["0", "0"] / 
+    (confusion_matrix["0", "0"] + confusion_matrix["1", "0"])
+  classSensitivity <- confusion_matrix["1", "1"] / 
+    (confusion_matrix["1", "1"] + confusion_matrix["0", "1"])
+
+  tibble(
+    classifier = classifier_name,
+    error = classError,
+    specificity = classSpecificity,
+    sensitivity = classSensitivity,
+    fold = fold
+  )
+}
+
+for (fold in 1:k) {
+  # split into train and test data
+  bankTrain <- bankNote[kfInd != fold, ]
+  bankTest <- bankNote[kfInd == fold, ]
+  x_train <- select(bankTrain, -class)
+  y_train <- bankTrain[, "class"]
+  x_test <- select(bankTest, -class)
+  y_test <- bankTest[, "class"]
+  
+  # logistic regression
+  lrFit <- glm(class ~ ., data = bankTrain, family = binomial)
+  lrPredict <- predict(lrFit, newdata = bankTest, type = "response")
+  lrCM <- table(y_test, round(lrPredict))
+  xvalResults <- rbind(xvalResults, bundleStats(lrCM, "logistic", k))
+  
+  # lda
+  ldaFit <- lda(class ~ ., data = bankTrain)
+  ldaPredict <- predict(ldaFit, newdata = bankTest)
+  ldaCM <- table(y_test, as.numeric(ldaPredict$x > 0))
+  xvalResults <- rbind(xvalResults, bundleStats(ldaCM, "lda", k))
+
+  # qda
+  qdaFit <- qda(class ~ ., data = bankTrain)
+  qdaPredict <- predict(qdaFit, newdata = bankTest)
+  qdaCM <- table(y_test, qdaPredict$class)
+  xvalResults <- rbind(xvalResults, bundleStats(qdaCM, "qda", k))
+
+  # k-nearest neighbor
+  for (nn in nns) {
+    knnFit <- knn(
+      x_train, test = x_test, 
+      cl = y_train, k = nn)
+    knnCM <- table(y_test, knnFit)
+    knnName <- paste("knn", nn)
+    xvalResults <- rbind(xvalResults, bundleStats(knnCM, knnName, k))
+  }
+}
+```
+
+``` {r xvalPlots}
+xvalTall <- xvalResults %>% gather(
+  key = "metric", value = "score", -classifier, -fold)
+
+ggplot(xvalTall, aes(x = classifier, y = score)) + geom_boxplot() + 
+  facet_grid(metric ~ ., scales = "free_y")
+```
+
+# Extra 20 points problem: naive Bayes classifier
+
+Fit naive Bayes classifier (see lecture slides for examples of using `naiveBayes` function from package `e1071`) on banknote authentication dataset and assess its performance on test data by resampling along with logistic regression, LDA, QDA and KNN in Problem 4 above.  In other words, add naive Bayes to the rest of the methods evaluated above *and explain notable increase in the test error* for the naive Bayes classifier.  Please notice that the requirement for *explaining* the difference in performance of the naive Bayes classifier comparing to all others is essential for earning all the points available for this problem.  This is an extra point problem designed to be a level harder than the rest -- ideally, the explanation, aside from correctly pointing at the source of degraded performance, should also include numerical/graphical illustration of its effect using informative representation of banknote authentication data or relevant simulated data.  Best of luck!

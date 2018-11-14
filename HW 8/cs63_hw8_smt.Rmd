@@ -1,0 +1,201 @@
+---
+title: "CSCI E-63C Week 8 Problem Set"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(cluster)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preface
+
+For this problem set we will exercise some of the measures for evaluating "goodness of clustering" presented in the lecture this week on the clusters obtained for the World Health Statistics (WHS) dataset from week 6.  Please feel free to adapt/reuse code presented in lecture slides as necessary or implementations already available in R.  All problems presented below are expected to be performed on *scaled* WHS data -- if somewhere it does not mention it explicitly, please assume that it is scaled data that should be used. 
+
+Lastly, as a dose of reality check: WHS is a dataset capturing variability of population health measures across more or less the entire diversity of societies in the world -- please be prepared to face the fact that resulting clustering structures are far from textbook perfect, may not be very clearly defined, etc.
+
+## Note on quakes data (and *3 extra points per problem*) 
+
+As you will notice, WHS dataset does not have the most striking cluster structure to it - at least as far as formal measurements of cluster strength that we are working with this week are concerned (or the notion that there is well defined "optimal" number of clusters when split of observations into larger or smaller groups results in "worse" metrics). Not an uncommon situation for the data we have to work with at all.
+
+As an opportunity to see the output of the code that you are using/developing for problems in this set when applied to a dataset with more distinct substructure (and earn extra points by doing that)  for each of the five problems there are presented below (four required, one for extra points) once you generated required plots for WHS dataset, adding the same kinds of plots but for a standard R dataset "quakes" will be earning *3 extra points* for each problem.  So that if everything works perfectly this could add 15 extra points to the total for this week (5 problems including an extra point problem times 3 extra points each) so that along with the extra 5 points problem below, there is an opportunity of adding up to 20 extra points to this week total.
+
+Dataset "quakes" is routinely available in R upon log in - to "see" it, the following should just work without any further steps for a standard R installation:
+
+```{r,fig.width=6,fig.height=6}
+clr <- gray((quakes$depth-min(quakes$depth))/as.vector(range(quakes$depth)%*%c(-1,1)))
+plot(quakes$lat,quakes$long,col=clr)
+```
+ 
+or, similarly, if you are a ggplot fan (in which case you will know to load ggplot2 library first):
+
+```{r,fig.width=6,fig.height=6}
+ggplot(quakes,aes(x=lat,y=long,colour=depth))+geom_point()
+```
+ 
+If you write your code with reusability in mind, applying it to "quakes" should be just a straightforward drop in replacement of WHS data frame with that of "quakes".  You will see that the subclasses of observations are so well defined in "quakes" that is almost boring in its own way.  Nothing is perfect in this world, but you should see more interesting behavior of CH index in this case, for example.
+
+To get the most (in terms of learning and points) out of this exercise (applying the same methods to two different datasets) please consider this as an opportunity to reflect on the differences in the behaviour / outcome of the same method when applied to two different datasets.  Think (you don't have to answer in writing to these -- they are just to help you spot the differences and interpret them) about questions such as:
+
+* What would be the behaviour of those metrics if the "true" number of clusters was two?
+* For the quakes dataset -- what subsets of observations correspond to the clusters found by K-means / hierarchical clustering?
+* Do they correspond to visually apparent groups of observations?  Quakes is relatively low dimensional dataset after all -- location in 3D and magnitude, plus number of stations highly correlated with magnitude.
+* How are those numbers of clusters reflected in the plots of "clustering strength" metrics (CH-index, gap statistic etc.)?
+* Are there any attributes in quakes dataset that are skewed enough to justify data transformation?  What would be an effect of that?
+* Back to WHS dataset -- what are the differences in the behavior of those metrics (CH-index, etc.) between quakes and WHS dataset?
+
+Once again, the complete answer to the extra points question does *not* have to include written answers to each (or any) of these six questions above, but it should provide some form of the summary of the insights you have developed from comparing these results for these two datasets.
+
+# Problem 1: within/between cluster variation and CH-index (15 points)
+
+Present plots of CH-index as well as (total) within and between cluster variance provided by K-means clustering on scaled WHS data for 2 through 20 clusters.  Choose large enough value of `nstart` for better stability of the results across multiple trials and evaluate stability of those results across several runs.  Discuss the results and whether the shape of the curves suggest specific number of clusters in the data.
+
+``` {r readWHS}
+whsUnscaled <- read.table("whs2016_AnnexB-data-wo-NAs.txt", 
+                          sep = "\t", header = TRUE, quote = "", 
+                          encoding = "ISO-8859-1")
+whs <- scale(whsUnscaled)
+summary(whs[,c(1,4,7,10,17)])
+pairs(whs[,c(1,4,7,10,17)])
+```
+
+
+``` {r withinBetweenCHWHS}
+clusterMetrics = tibble()
+for (k in 2:20) {
+  km <- kmeans(whs, k, nstart = 20)
+  ch <- (km$betweenss / (k - 1)) / (km$tot.withinss / (nrow(whs) - k))
+  clusterMetrics <- rbind(clusterMetrics, tibble(
+    clusters = k,
+    within = km$tot.withinss,
+    between = km$betweenss,
+    ch_index = ch
+  ))
+}
+
+clusterMetrics <- clusterMetrics %>% gather(key = "metric", value = "value", -clusters)
+ggplot(clusterMetrics, aes(x = clusters, y = value, col = metric)) + geom_point() + geom_line() + facet_grid(metric ~ ., scales = "free_y") + theme(legend.position = "none")
+```
+
+These results do not indicate a clearly defined cluster structure in the data. There are no sudden jumps in the within or between cluster metrics, and there is not a peak in the CH-index metric.
+
+``` {r scaleQuakes}
+pairs(quakes)
+xformQuakes <- quakes
+xformQuakes[, "stations"] <- log(xformQuakes[, "stations"])
+scaledQuakes = scale(xformQuakes)
+pairs(scaledQuakes)
+```
+
+``` {r withinBetweenCHQuakes}
+clusterMetrics = tibble()
+for (k in 2:20) {
+  km <- kmeans(scaledQuakes, k, nstart = 20)
+  ch <- (km$betweenss / (k - 1)) / (km$tot.withinss / (nrow(scaledQuakes) - k))
+  clusterMetrics <- rbind(clusterMetrics, tibble(
+    clusters = k,
+    within = km$tot.withinss,
+    between = km$betweenss,
+    ch_index = ch
+  ))
+}
+
+clusterMetrics <- clusterMetrics %>% gather(key = "metric", value = "value", -clusters)
+ggplot(clusterMetrics, aes(x = clusters, y = value, col = metric)) + geom_point() + geom_line() + facet_grid(metric ~ ., scales = "free_y") + theme(legend.position = "none")
+```
+
+The CH-index indicates there may be some clustering, but within and between cluster metrics do not show strong evidence for a clustering of the data.
+
+# Problem 2: gap statistics (15 points)
+
+Using code provided in the lecture slides for calculating gap statistics or one of its implementations available in R (e.g. `clusGap` from library `cluster`) compute and plot gap statistics for K-means clustering of scaled WHS data for 2 through 20 clusters.  Discuss whether it indicates presence of clearly defined cluster structure in this data.
+
+``` {r gapWHS}
+whsGap <- clusGap(whs, kmeans, 20)
+ggplot(as.tibble(whsGap$Tab), aes(x = 1:20, y = logW)) + geom_point() + geom_line()
+ggplot(as.tibble(whsGap$Tab), aes(x = 1:20, y = SE.sim)) + geom_point() + geom_line()
+ggplot(as.tibble(whsGap$Tab), aes(x = 1:20, y = SE.sim)) + geom_point() + geom_line()
+```
+
+The results are ambiguous but indicate there may be some evidence for a small number of clusters.
+
+``` {r gapQuake}
+quakeGap <- clusGap(scaledQuakes, kmeans, 20)
+ggplot(as.tibble(quakeGap$Tab), aes(x = 1:20, y = logW)) + geom_point() + geom_line()
+ggplot(as.tibble(quakeGap$Tab), aes(x = 1:20, y = SE.sim)) + geom_point() + geom_line()
+ggplot(as.tibble(quakeGap$Tab), aes(x = 1:20, y = gap)) + geom_point() + geom_line()
+```
+
+The results are difficult to interpret. The gap is almost always increasing and, by the rule of thumb introduced in class to use the first maximum of gap statistic, it's tough to say if two or twenty clusters is the correct number.
+
+# Problem 3: stability of hierarchical clustering (15 points)
+
+For top 2, 3 and 4 clusters (as obtained by `cutree` at corresponding levels of `k`) found by Ward method in `hclust` and by K-means when applied to the scaled WHS data compare cluster memberships between these two methods and describe their concordance.  This problem is similar to the one from week 6 problem set, but this time it is *required* to: 1) use two dimensional contingency tables implemented by `table` to compare membership between two assignments of observations to clusters, and 2) programmatically re-order rows and columns in the `table` outcome in the increasing order of observations shared between two clusters (please see examples in lecture slides).
+
+``` {r hclustWHS}
+ks <- c(2, 3, 4)
+d <- dist(whs)
+whsHC <- hclust(d, method = "ward.D")
+whsCut <- cutree(whsHC, k = ks)
+
+for (k in ks) {
+  km <- kmeans(whs, k, nstart = 20)
+  print(table(km$cluster, whsCut[,as.character(k)]))
+}
+```
+
+``` {r hclustQuakes}
+ks <- c(2, 3, 4)
+d <- dist(scaledQuakes)
+quakesHC <- hclust(d, method = "ward.D")
+quakesCut <- cutree(quakesHC, k = ks)
+
+for (k in ks) {
+  km <- kmeans(scaledQuakes, k, nstart = 20)
+  print(table(km$cluster, quakesCut[,as.character(k)]))
+}
+```
+
+Although membership for the two-cluster arrangement is not so dissimilar between the two methods, differences are far more dramatic for three and four clusters. 
+
+## For *extra* 5 points: between/within variance in hierarchical clusters
+
+Using functions `between` and `within` provided in the lecture slides calculate between and (total) within cluster variances for top 2 through 20 clusters defined by Ward's hierarchical clustering when applied to scaled WHS data.  Plot the results.  Compare their behavior to that of the same statistics when obtained for K-means clustering above.
+
+
+# Problem 4: Brute force randomization in hierarchical clustering (15 points)
+
+Compare distribution of the heights of the clusters defined by `hclust` with Ward's clustering of Euclidean distance between countries in scaled WHS dataset and those obtained by applying the same approach to the distances calculated on randomly permuted WHS dataset as illustrated in the lecture slides.  Discuss whether results of such brute force randomization are supportive of presence of unusually close or distant sets of observations within WHS data.
+
+``` {r whsBruteForce}
+ori.heights = whsHC$height
+rnd.heights = numeric() 
+for ( i.sim in 1:100 ) {
+  data.rnd <-apply(whs,2,sample) 
+  hw.rnd=hclust(dist(data.rnd),method="ward.D2") 
+  rnd.heights <- c(rnd.heights,hw.rnd$height)
+} 
+
+plot(ori.heights,rank(ori.heights)/length(ori.heights), col="red", xlab="height", ylab="F(height)", pch=19)
+points(rnd.heights,rank(rnd.heights)/length(rnd.heights), col="blue")
+```
+
+It appears the results are indicating the clusters are mostly unusually close as compared to random data, until you get to the very highest number of clusters.
+
+``` {r quakeBruteForce}
+ori.heights = quakesHC$height
+rnd.heights = numeric() 
+for ( i.sim in 1:100 ) {
+  data.rnd <-apply(scaledQuakes,2,sample) 
+  hw.rnd=hclust(dist(data.rnd),method="ward.D2") 
+  rnd.heights <- c(rnd.heights,hw.rnd$height)
+} 
+
+plot(ori.heights,rank(ori.heights)/length(ori.heights), col="red", xlab="height", ylab="F(height)", pch=19)
+points(rnd.heights,rank(rnd.heights)/length(rnd.heights), col="blue")
+```
+
+It appears that the clusters are very similar between random and actual data.

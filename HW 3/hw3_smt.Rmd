@@ -1,0 +1,201 @@
+---
+title: 'CSCI E-63C: Week 3 Problem Set'
+output:
+  html_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE, results='hide'}
+library(ggplot2)
+library(ISLR)
+library(car)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preface
+
+The goal of this week problem set is to practice basic tools available in R for developing linear regression models with one or more variables, conduct visual and quantitative evaluation of their relative performance and reason about associated tradeoffs.  We will continue working with abalone dataset (that you have already downloaded and used for the previous week problem set) and will use some of the variables available there to develop model of snail age.  Given the simplicity of the measurements available in this dataset (essentially just dimensions and masses of various compartments of the mollusc) and potential variability in growth rates due to differences in environmental conditions (e.g. location, temperature, nutrients, etc.) that are not captured in this dataset, we should expect substantial fraction of variability in abalone age to remain unexplained as part of this exercise.  Furthermore, given strong correlations between some of the predictors in this dataset it is possible that only a small number of those could be justifiably used in the model (for the reasons related to collinearity - see Ch.3.3.3 section 6 of ISLR).
+
+```{r abalone, echo=FALSE, results='hide'}
+abaDat <- read.table("abalone.data",sep=",")
+colnames(abaDat) <- c("sex","len","diam","h","ww","sw","vw","sh","rings")
+abaDat$age <- abaDat$rings+1.5
+dim(abaDat)
+```
+
+Here an uninspiring example of the model of shell length and diameter is used to illustrate R tools that will be needed for this problem set.  Please note that by this time `abaDat` dataset has been already created and corresponding columns have been named `len` and `diam` respectively -- the variable names in your code likely will be different.  Then a simple linear model can be fit using function `lm()` and summarized using `summary`:
+
+```{r diamlensumm}
+summary(lm(len~diam,abaDat))
+```
+
+The plot of predictor and response with regression line added to it can be generated using standard R functions `plot` and `abline`:
+
+```{r diamlenplot}
+plot(abaDat[,c("diam","len")])
+abline(lm(len~diam,abaDat))
+```
+
+Diagnostic plots for this model can be obtained also by the call to `plot` with `lm()` result as input:
+
+```{r diamlendiag,fig.width=8,fig.height=8}
+old.par <- par(mfrow=c(2,2))
+plot(lm(len~diam,abaDat))
+par(old.par)
+```
+
+R functions `confint` returns confidence intervals for model parameters and `predict` (with appropriate parameters) returns model predictions for the new data and corresponding estimates of uncertainty associated with them:
+
+```{r diamlenintls}
+confint(lm(len~diam,abaDat))
+predict(lm(len~diam,abaDat),newdata=data.frame(diam=c(0.2,0.3,0.4,0.5)),interval='confidence')
+predict(lm(len~diam,abaDat),newdata=data.frame(diam=c(0.2,0.3,0.4,0.5)),interval='prediction')
+```
+
+# Problem 1: model of age and shell weight (30 points)
+
+Here we will identify variable most correlated with the outcome (abalone age), build simple linear model of snail age (rings+1.5 as per dataset description) as function of this variable, evaluate model summary and diagnostic plots and assess impact of using log-transformed (instead of untransformed) attributes on the model peformance.  The following steps provide approximate outline of tasks for achieving these goals:
+
+1. Calculate correlations between all *continuous* attributes in this dataset.  Given potential non-linear relationship between some of the attributes and snail age, it might be prudent to use both Pearson and Spearman correlations to determine which variable is most robustly correlated with age.
+
+``` {r abaloneCorr}
+contCols <- c(
+  "len",
+  "diam",
+  "h",
+  "ww",
+  "sw",
+  "vw",
+  "sh")
+pearCor <- cor(abaDat[,contCols], abaDat$age, method="pearson")
+spearCor <- cor(abaDat[,contCols], abaDat$age, method="spearman")
+cbind(pearCor, spearCor)
+```
+
+Regardless of correlation method, it appears the shell weight is most correlated with the abalone age.
+
+2. Fit linear model of age as outcome and shell weight as predictor using R function `lm`, display the result using `summary` function, use its output to answer the following questions:
+
+   + Does this predictor explain significant amount of variability in response?  I.e. is there significant association between them?
+   
+   + What is the RSE and $R^2$ of this model?  Remember, you can find them in the `summary` output or use `sigma` and `r.sq` slots in the result returned by `summary` instead
+   
+   + What are the model coefficients and what would be their interpretation? What is the meaning of the intercept of the model, for example?  How sensible is it?
+   
+``` {r abaloneShLM}
+sh_lm <- lm(age ~ sh, abaDat)
+summary(sh_lm)
+```
+
+The Pr(>|t|) column indicates shell weight is indeed significant in predicting age. The RSE is 2.51 and the R^2 is 0.3938. The coefficient for sh indicates that, as the shell weight increases by one, the age increases by 14.
+
+``` {r abaloneWtAgePlot}
+plot(abaDat$sh, abaDat$age)
+```
+
+Looking at a plot of shell weight versus age, the coefficient of 14.5, saying that an increase in shell weight of 0.1 indicates an increase in age of 1.45 years, does make some sense. It's not perfect, however. Young abalone seem to have weight much lower than this model would indicate.
+
+3. Create scatterplot of age and shell weight and add regression line from the model to the plot using `abline` function
+
+``` {r abaloneWtAgeRegLine}
+plot(abaDat$sh, abaDat$age)
+abline(sh_lm)
+```
+
+4. Create diagnostic plots of the model and comment on any irregularities that they present.  For instance, does plot of residuals vs. fitted values suggest presence of non-linearity that remained unexplained by the model?  How does it compare to the plot of the predictor and outcome with regression line added to it that was generated above?
+
+``` {r abaloneWtAgeDiag}
+old.par <- par(mfrow=c(2,2))
+plot(sh_lm)
+par(old.par)
+```
+
+The residuals vs. fitted plot does have a significant bend to it away from the zero line at each end. This would indicate there's some non-linearity that the linear model is not picking up. This is fairly evident in the scatter plot from part three. At the low end, most points are below the fit line. And at the high end, the majority of points are above the trend line.
+
+5. Use function `confint` to obtain confidence intervals on model parameters
+
+``` {r abaloneWtAgeConfint}
+confint(sh_lm)
+```
+
+6. Use this model and `predict` function to make predictions for shell weight values of 0.1, 0.2 and 0.3. Use `confidence` and `prediction` settings for parameter `interval` in the call to `predict` to obtain confidence and prediction intervals on these model predictions.  Explain the differences between interpretation of:
+    + confidence intervals on model parameters and model predictions
+    + confidence and prediction intervals on model predictions
+    + Comment on whether confidence or prediction intervals (on predictions) are wider and why
+
+``` {r abaloneWtAgePredict}
+predict(sh_lm, newdata=data.frame(sh=c(0.1,0.2,0.3)), interval='confidence')
+predict(sh_lm, newdata=data.frame(sh=c(0.1,0.2,0.3)), interval='prediction')
+```
+
+First, the confidence intervals on model parameters give a range for the most likely values for the intercept and coefficient ($\alpha$ and $\beta$ in $\alpha + \beta X$) for this particular model. In comparison, confidence intervals on model predictions give a range for where the fit line is most likely to lie at any given point.
+
+There is inherently some unexplained variance that will still exist in the model, and the prediction intervals will reflect this variance. This is why they appear much larger than the confidence intervals above. The most likely values for the fit line may be in a very tight range, but the predictions can be arranged fairly diffusely around that line if the model leaves a significant amount of unexplained variance.
+
+# Problem 2: model using log-transformed attributes (20 points)
+
+1. Use `lm()` to fit a regression model of *log-transformed* age as linear function of *log-transformed* shell weight and use `summary` to evaluate its results.  Can we compare fits obtained from using untransformed (above) and log-transformed attributes?  Can we directly compare RSE from these two models?  What about comparing $R^2$?  What would we conclude from this? (Please consult ISLR Ch.3.1.3 if unsure)  What would be the physical meaning of model coefficients this time?  What does model intercept represent in this case, for example?  How sensible is this and how does it compare to that from the fit on untransformed data?
+
+``` {r abaloneLogShLM}
+sh_log_lm <- lm(log(age) ~ log(sh), abaDat)
+summary(sh_log_lm)
+```
+
+It is possible, but tricky, to compare fits from untransformed and log-transformed attributes. It is not possible to compare the RSE, as these are calculated in the units of the outcome. However R^2 can be used as a comparison instead. In this case, the R^2 value has increased from 0.3938 to 0.5273, indicating a better fit. 
+
+The transformations make model parameters more difficult to understand intuitively. Because of the transformations, the intercept indicates that abalone of shell weight $e^0 = 1$ will have on average an age of $e^{2.8} = 16.44$. This seems pretty rational based on the scatter plot from above. Certainly more rational than the untransformed model.
+
+2. Create a XY-scatterplot of log-transformed predictor and response and add corresponding regression line to it.  Compared it to the same plot but in untransformed coordinates obtained above.  What would you conclude from such comparison?
+
+``` {r abaloneLogWtAgeRegLine}
+plot(log(abaDat$sh), log(abaDat$age))
+abline(sh_log_lm)
+```
+
+Compared to the plot of untransformed shell weight versus age, this plot looks much more rational. The data points are fairly well centered around the fit line this time.
+
+3. Make diagnostic plots for model fit on log-transformed age and shell weight.  Compare their appearance to that for the model using original scale of measurements. What would you conclude from this comparison about their relative quality?
+
+``` {r abaloneLogWtAgeDiag}
+old.par <- par(mfrow=c(2,2))
+plot(sh_log_lm)
+par(old.par)
+```
+
+These diagnostic plots, as compared to those above, look much less pathological. The residual versus fitted plot in particular shows a nearly flat line almost right on top of the zero line. Very nice. The residuals versus leverage plot shows that there could be some improvement at high leverage points but in all this representation is much stronger than the untransformed one.
+
+# Problem 3: Adding second variable to the model (10 points)
+
+To explore effects of adding another variable to the model, continue using log-transformed attributes and fit a model of log-transformed age as a function of shell weight and shucked weight (both log-transformed also).  Just an additive model -- no interaction term is necessary at this point. Please obtain and evaluate the summary of this model fit, confidence intervals on its parameters and its diagnostic plots. Where applicable, compare them to the model obtained above and reflect on pros and cons of including shucked weight as another variable into the model.
+
+``` {r abaloneSwAgePlot}
+plot(abaDat$sw, abaDat$age)
+```
+
+``` {r abaloneLogShSwLM}
+shsw_log_lm <- lm(log(age) ~ log(sh) + log(sw), abaDat)
+summary(shsw_log_lm)
+```
+
+``` {r abaloneLogShSwConfint}
+confint(shsw_log_lm)
+```
+
+``` {r abaloneLogShSwPredict}
+new_df = data.frame(
+  sh=c(0.2,0.2,0.2),
+  sw=c(0.1,0.2,0.3)
+)
+exp(predict(shsw_log_lm, newdata=new_df, interval='confidence'))
+exp(predict(shsw_log_lm, newdata=new_df, interval='prediction'))
+```
+
+``` {r abaloneLogShSwAgeDiag}
+old.par <- par(mfrow=c(2,2))
+plot(shsw_log_lm)
+par(old.par)
+```
+
+The model summary indicates all three parameters in this linear model are significant. The R^2 value is also higher than the previous two models, which shows that the fit is better than the others. Interestingly, the coefficient for the shucked weight is negative which means that higher shucked weights are associated with lower ages. There is probably significant correlation between shucked and shell weights however, so without an interaction term it's difficult to tell what exactly is going on.
+
+Looking at the diagnostic plots the fit is not perfect. The residual versus fitted plot shows some misfit around the high and low points. This interpretation is emphasized by the residuals versus leverage plot which has a significant bend away from the zero line.
