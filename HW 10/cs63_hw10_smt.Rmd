@@ -9,7 +9,7 @@ output:
 library(randomForest)
 library(MASS)
 library(class)
-library(ggplot2)
+library(tidyverse)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -84,6 +84,80 @@ For the purposes of this problem set you can use the code above (probably best t
 # Sub-problem 1 (15 points): effect of sample size
 
 Generate training datasets with `nObs=25`, `100` and `500` observations such that two variables are associated with the outcome as parameterized above and three are not associated and average difference between the two classes is the same as above (i.e. in the notation from the above code `nClassVars=2`, `nNoiseVars=3` and `deltaClass=1`).  Obtain random forest, LDA and KNN test error rates on a (for greater stability of the results, much larger, say, with 10K observations) test dataset simulated from the same model.  Describe the differences between different methods and across the sample sizes used here.
+
+```{r generateDataFunction}
+generateData <- function(nObs = 1000, nClassVars = 2, nNoiseVars = 1, deltaClass = 1, 
+                         nTest = 10000) {
+  # nObs: How many observations
+  # nClassVars: How many predictors are associated with outcome
+  # nNoiseVars: How many predictors are not
+  # deltaClass: To modulate average difference between two classes' predictor values
+  # nTest: Size of the test set
+  
+  # Simulate training and test datasets with an interaction 
+  # between attribute levels associated with the outcome:
+  xyzTrain <- matrix(rnorm(nObs*(nClassVars+nNoiseVars)),
+                     nrow=nObs,ncol=nClassVars+nNoiseVars)
+  xyzTest <- matrix(rnorm(nTest*(nClassVars+nNoiseVars)),
+                    nrow=nTest,ncol=nClassVars+nNoiseVars)
+  classTrain <- 1
+  classTest <- 1
+  for ( iTmp in 1:nClassVars ) {
+    deltaTrain <- sample(deltaClass*c(-1,1),nObs,replace=TRUE)
+    xyzTrain[,iTmp] <- xyzTrain[,iTmp] + deltaTrain
+    classTrain <- classTrain * deltaTrain
+    deltaTest <- sample(deltaClass*c(-1,1),nTest,replace=TRUE)
+    xyzTest[,iTmp] <- xyzTest[,iTmp] + deltaTest
+    classTest <- classTest * deltaTest
+  }
+  classTrain <- factor(classTrain > 0)
+  list(trainData = xyzTrain, trainClass = classTrain, testData = xyzTest, testClass = classTest)
+}
+```
+
+``` {r probOne}
+obsRange <- c(25, 100, 500)
+probOneResults <- tibble()
+
+for (obs in obsRange) {
+  probOneData <- generateData(nObs = obs, nClassVars = 2, nNoiseVars = 3, deltaClass = 1)
+  
+  # Fit random forest to train data, obtain test error:
+  rfRes <- randomForest(probOneData$trainData, probOneData$trainClass)
+  rfTmpTbl <- table(probOneData$testClass,predict(rfRes,newdata=probOneData$testData))
+  probOneResults <- rbind(probOneResults, tibble(
+    nObs = obs,
+    classifier = "rf",
+    acc = sum(diag(rfTmpTbl)) / sum(rfTmpTbl)
+  ))
+
+  # Fit LDA model to train data and evaluate error on the test data:
+  ldaRes <- lda(probOneData$trainData,probOneData$trainClass)
+  ldaTmpTbl <- table(probOneData$testClass,predict(ldaRes,newdata=probOneData$testData)$class)
+  probOneResults <- rbind(probOneResults, tibble(
+    nObs = obs,
+    classifier = "lda",
+    acc = sum(diag(ldaTmpTbl)) / sum(ldaTmpTbl)
+  ))
+
+  # knn classifier
+  dfTmp <- NULL
+  for ( kTmp in sort(unique(floor(1.8^(1:10)))) ) {
+    knnRes <- knn(xyzTrain,xyzTest,classTrain,k=kTmp)
+    tmpTbl <- table(classTest,knnRes)
+    probOneResults <- rbind(probOneResults, tibble(
+      nObs = obs,
+      classifier = paste("knn", kTmp),
+      acc = sum(diag(tmpTbl)) / sum(tmpTbl)
+    ))
+  }
+}
+```
+
+``` {r plotProbOne}
+ggplot(probOneResults, aes(x = fct_reorder(classifier, acc), y = acc)) + 
+  geom_point() + facet_grid(nObs ~ .)
+```
 
 # Sub-problem 2 (15 points): effect of signal magnitude
 
