@@ -143,7 +143,7 @@ for (obs in obsRange) {
   # knn classifier
   dfTmp <- NULL
   for ( kTmp in sort(unique(floor(1.8^(1:10)))) ) {
-    knnRes <- knn(xyzTrain,xyzTest,classTrain,k=kTmp)
+    knnRes <- knn(probOneData$trainData,probOneData$testData,probOneData$trainClass,k=kTmp)
     tmpTbl <- table(classTest,knnRes)
     probOneResults <- rbind(probOneResults, tibble(
       nObs = obs,
@@ -156,16 +156,115 @@ for (obs in obsRange) {
 
 ``` {r plotProbOne}
 ggplot(probOneResults, aes(x = fct_reorder(classifier, acc), y = acc)) + 
-  geom_point() + facet_grid(nObs ~ .)
+  geom_point() + facet_grid(nObs ~ ., scales = "free_y")
 ```
 
 # Sub-problem 2 (15 points): effect of signal magnitude
 
 For training datasets with `nObs=100` and `500` observations simulate data as shown above with average differences between the two classes that are same as above, half of that and twice that (i.e. `deltaClass=0.5`, `1` and `2`).  Obtain and plot test error rates of random forest, LDA and KNN for each of the six (two samples sizes times three signal magnitudes) combinations of sample size and signal strengths.  As before use large test dataset (e.g. 10K observations or so) for greater stability of the results.  Describe the most pronounced differences across error rates for those datasets: does the increase in the number of observations impact the error rate of the models?  Does change in the magnitude of signal impact their performance?  Are different classifier approaches impacted in a similar way?
 
+``` {r probTwo}
+obsRange <- c(100, 500)
+dClassRange <- c(0.5, 1, 2)
+probTwoResults <- tibble()
+for (dClass in dClassRange) {
+  for (obs in obsRange) {
+    probTwoData <- generateData(nObs = obs, nClassVars = 2, nNoiseVars = 3, deltaClass = dClass)
+    
+    # Fit random forest to train data, obtain test error:
+    rfRes <- randomForest(probTwoData$trainData, probTwoData$trainClass)
+    rfTmpTbl <- table(probTwoData$testClass,predict(rfRes,newdata=probTwoData$testData))
+    probTwoResults <- rbind(probTwoResults, tibble(
+      nObs = obs,
+      dClass = dClass,
+      classifier = "rf",
+      acc = sum(diag(rfTmpTbl)) / sum(rfTmpTbl)
+    ))
+  
+    # Fit LDA model to train data and evaluate error on the test data:
+    ldaRes <- lda(probTwoData$trainData,probTwoData$trainClass)
+    ldaTmpTbl <- table(probTwoData$testClass,predict(ldaRes,newdata=probTwoData$testData)$class)
+    probTwoResults <- rbind(probTwoResults, tibble(
+      nObs = obs,
+      dClass = dClass,
+      classifier = "lda",
+      acc = sum(diag(ldaTmpTbl)) / sum(ldaTmpTbl)
+    ))
+  
+    # knn classifier
+    dfTmp <- NULL
+    for ( kTmp in sort(unique(floor(1.8^(1:10)))) ) {
+      knnRes <- knn(probTwoData$trainData,probTwoData$testData,probTwoData$trainClass,k=kTmp)
+      tmpTbl <- table(classTest,knnRes)
+      probTwoResults <- rbind(probTwoResults, tibble(
+        nObs = obs,
+        dClass = dClass,
+        classifier = paste("knn", kTmp),
+        acc = sum(diag(tmpTbl)) / sum(tmpTbl)
+      ))
+    }
+  }
+}
+```
+
+``` {r plotProbTwo}
+ggplot(probTwoResults, aes(x = fct_reorder(classifier, acc), y = acc, col = nObs)) + 
+  geom_point() + facet_grid(dClass ~ ., scales = "free_y")
+```
+
 # Sub-problem 3 (15 points): varying counts of predictors
 
 For all possible pairwise combinations of the numbers of variables associated with outcome (`nClassVars=2` and `5`) and those not associated with the outcome (`nNoiseVars=1`, `3` and `10`) -- six pairwise combinations in total -- obtain and present graphically test errors from random forest, LDA and KNN.  Choose signal magnitude (`deltaClass`) and training data sample size so that this simulation yields non-trivial results -- noticeable variability in the error rates across those six pairwise combinations of attribute counts.  Describe the results: what is the impact of the increase of the number of attributes associated with the outcome on the classifier performance?  What about the number of attributes not associated with outcome - does it affect classifier error rate?  Are different classifier methods affected by these simulation parameters in a similar way?
+
+``` {r probThree}
+classVarRange <- c(2, 5)
+noiseVarRange <- c(1, 3, 10)
+probThreeResults <- tibble()
+for (classVar in classVarRange) {
+  for (noiseVar in noiseVarRange) {
+    probThreeData <- generateData(nObs = 500, nClassVars = classVar, 
+                                  nNoiseVars = noiseVar, deltaClass = 0.5)
+    
+    # Fit random forest to train data, obtain test error:
+    rfRes <- randomForest(probThreeData$trainData, probThreeData$trainClass)
+    rfTmpTbl <- table(probThreeData$testClass,predict(rfRes,newdata=probThreeData$testData))
+    probThreeResults <- rbind(probThreeResults, tibble(
+      classVars = classVar,
+      noiseVars = noiseVar,
+      classifier = "rf",
+      acc = sum(diag(rfTmpTbl)) / sum(rfTmpTbl)
+    ))
+  
+    # Fit LDA model to train data and evaluate error on the test data:
+    ldaRes <- lda(probThreeData$trainData,probThreeData$trainClass)
+    ldaTmpTbl <- table(probThreeData$testClass,predict(ldaRes,newdata=probThreeData$testData)$class)
+    probThreeResults <- rbind(probThreeResults, tibble(
+      classVars = classVar,
+      noiseVars = noiseVar,
+      classifier = "lda",
+      acc = sum(diag(ldaTmpTbl)) / sum(ldaTmpTbl)
+    ))
+  
+    # knn classifier
+    dfTmp <- NULL
+    for ( kTmp in sort(unique(floor(1.8^(1:10)))) ) {
+      knnRes <- knn(probThreeData$trainData,probThreeData$testData,probThreeData$trainClass,k=kTmp)
+      tmpTbl <- table(classTest,knnRes)
+      probThreeResults <- rbind(probThreeResults, tibble(
+        classVars = classVar,
+        noiseVars = noiseVar,
+        classifier = paste("knn", kTmp),
+        acc = sum(diag(tmpTbl)) / sum(tmpTbl)
+      ))
+    }
+  }
+}
+```
+
+``` {r plotProbThree}
+ggplot(probThreeResults, aes(x = fct_reorder(classifier, acc), y = acc, col = classVars)) + 
+  geom_point() + facet_grid(noiseVars ~ ., scales = "free_y")
+```
 
 # Sub-problem 4: (15 points): effect of `mtry`
 
