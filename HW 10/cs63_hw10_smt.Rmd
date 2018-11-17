@@ -159,6 +159,8 @@ ggplot(probOneResults, aes(x = fct_reorder(classifier, acc), y = acc)) +
   geom_point() + facet_grid(nObs ~ ., scales = "free_y")
 ```
 
+As the sample size increases, random forest gets better and better. The others do as well (except for LDA) but the difference is much more dramatic for random forest and it eventually leaves the other methods in its dust.
+
 # Sub-problem 2 (15 points): effect of signal magnitude
 
 For training datasets with `nObs=100` and `500` observations simulate data as shown above with average differences between the two classes that are same as above, half of that and twice that (i.e. `deltaClass=0.5`, `1` and `2`).  Obtain and plot test error rates of random forest, LDA and KNN for each of the six (two samples sizes times three signal magnitudes) combinations of sample size and signal strengths.  As before use large test dataset (e.g. 10K observations or so) for greater stability of the results.  Describe the most pronounced differences across error rates for those datasets: does the increase in the number of observations impact the error rate of the models?  Does change in the magnitude of signal impact their performance?  Are different classifier approaches impacted in a similar way?
@@ -212,6 +214,8 @@ ggplot(probTwoResults, aes(x = fct_reorder(classifier, acc), y = acc, col = nObs
   geom_point() + facet_grid(dClass ~ ., scales = "free_y")
 ```
 
+As the number of observations increases, nearly every classifier gets better, particularly the knn classifiers with high k. As the distance between classes increases, random forest improves but it is difficult to tell if the others do as well as random forest dwarfs them on the accuracy plot.
+
 # Sub-problem 3 (15 points): varying counts of predictors
 
 For all possible pairwise combinations of the numbers of variables associated with outcome (`nClassVars=2` and `5`) and those not associated with the outcome (`nNoiseVars=1`, `3` and `10`) -- six pairwise combinations in total -- obtain and present graphically test errors from random forest, LDA and KNN.  Choose signal magnitude (`deltaClass`) and training data sample size so that this simulation yields non-trivial results -- noticeable variability in the error rates across those six pairwise combinations of attribute counts.  Describe the results: what is the impact of the increase of the number of attributes associated with the outcome on the classifier performance?  What about the number of attributes not associated with outcome - does it affect classifier error rate?  Are different classifier methods affected by these simulation parameters in a similar way?
@@ -223,7 +227,7 @@ probThreeResults <- tibble()
 for (classVar in classVarRange) {
   for (noiseVar in noiseVarRange) {
     probThreeData <- generateData(nObs = 500, nClassVars = classVar, 
-                                  nNoiseVars = noiseVar, deltaClass = 0.5)
+                                  nNoiseVars = noiseVar, deltaClass = 3)
     
     # Fit random forest to train data, obtain test error:
     rfRes <- randomForest(probThreeData$trainData, probThreeData$trainClass)
@@ -262,12 +266,64 @@ for (classVar in classVarRange) {
 ```
 
 ``` {r plotProbThree}
-ggplot(probThreeResults, aes(x = fct_reorder(classifier, acc), y = acc, col = classVars)) + 
-  geom_point() + facet_grid(noiseVars ~ ., scales = "free_y")
+ggplot(probThreeResults, aes(x = fct_reorder(classifier, acc), y = acc, col = noiseVars)) + 
+  geom_point() + facet_grid(classVars ~ ., scales = "free_y")
 ```
+
+Random forest blows the others out of the water once again with two correlated predictors, but with five it's only significantly better than the others with a single noise variable. LDA seems to be affected in a similar way, but it is difficult to tell what effect it is having on KNN. The results above seem to be more noise than signal.
 
 # Sub-problem 4: (15 points): effect of `mtry`
 
 Parameter `mtry` in the call to `randomForest` defines the number of predictors randomly chosen to be evaluated for their association with the outcome at each split (please see help page for `randomForest` for more details).  By default for classification problem it is set as a square root of the number of predictors in the dataset.  Here we will evaluate the impact of using different values of `mtry` on the error rate by random forest.
 
 For `nObs=5000`, `deltaClass=2`, `nClassVars=3` and `nNoiseVars=20` generate data using the above approach, run `randomForest` on it with `mtry=2`, `5` and `10` and obtain corresponding test error for these three models.  Describe the impact of using different values of `mtry` on the test error rate by random forest and compare it to that by LDA/KNN. 
+
+``` {r probFour}
+mtryRange <- c(2, 5, 10)
+
+probFourResults <- tibble()
+probFourData <- generateData(nObs = 5000, nClassVars = 3, 
+                              nNoiseVars = 20, deltaClass = 3)
+
+for (mtryVal in mtryRange) {
+  # Fit random forest to train data, obtain test error:
+  rfRes <- randomForest(probFourData$trainData, probFourData$trainClass, mtry = mtryVal)
+  rfTmpTbl <- table(probFourData$testClass,predict(rfRes,newdata=probFourData$testData))
+  probFourResults <- rbind(probFourResults, tibble(
+    classVars = classVar,
+    noiseVars = noiseVar,
+    classifier = paste("rf", mtryVal),
+    acc = sum(diag(rfTmpTbl)) / sum(rfTmpTbl)
+  ))
+}
+
+# Fit LDA model to train data and evaluate error on the test data:
+ldaRes <- lda(probFourData$trainData,probFourData$trainClass)
+ldaTmpTbl <- table(probFourData$testClass,predict(ldaRes,newdata=probFourData$testData)$class)
+probFourResults <- rbind(probFourResults, tibble(
+  classVars = classVar,
+  noiseVars = noiseVar,
+  classifier = "lda",
+  acc = sum(diag(ldaTmpTbl)) / sum(ldaTmpTbl)
+))
+
+# knn classifier
+dfTmp <- NULL
+for ( kTmp in sort(unique(floor(1.8^(1:10)))) ) {
+  knnRes <- knn(probFourData$trainData,probFourData$testData,probFourData$trainClass,k=kTmp)
+  tmpTbl <- table(classTest,knnRes)
+  probFourResults <- rbind(probFourResults, tibble(
+    classVars = classVar,
+    noiseVars = noiseVar,
+    classifier = paste("knn", kTmp),
+    acc = sum(diag(tmpTbl)) / sum(tmpTbl)
+  ))
+}
+```
+
+``` {r plotProbFour}
+ggplot(probFourResults, aes(x = fct_reorder(classifier, acc), y = acc)) + 
+  geom_point()
+```
+
+The KNN classifiers all perform terribly, but the random forest classifier works fairly well. LDA is only a tiny bit better than a coin flip. As mtry increases from 2 to 5 to 10, accuracy increases in kind.
