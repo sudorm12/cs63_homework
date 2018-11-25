@@ -51,7 +51,7 @@ Accuracy improves on the jump from 0.001 to 1 cost, but drops above that. In add
 costs <- c(0.1, 0.3, 0.5, 1, 3, 10, 30, 100)
 k <- 10
 kfInd <- sample(rep(c(1:k),length.out=nrow(dbaDat)))
-xvalResults <- tibble()
+xvalResultsLinSVM <- tibble()
 
 for (fold in 1:k) {
   dbaTrain <- dbaDat[kfInd != fold, ]
@@ -63,17 +63,20 @@ for (fold in 1:k) {
   svmFit <- svm(auth ~ ., data = dbaDat, kernel = "linear", scale = TRUE,
                 cost = tune.out$best.parameters$cost)
   svmCM <- table(dbaTest$auth, predict(svmFit, dbaTest))
-  xvalResults <- rbind(xvalResults, tibble(
+  xvalResultsLinSVM <- rbind(xvalResultsLinSVM, tibble(
+    classifier = "linsvm",
     fold = fold,
     best_cost = tune.out$best.parameters$cost,
     err = 1 - sum(diag(svmCM)) / sum(svmCM)
   ))
 }
 
-ggplot(xvalResults, aes(x = best_cost)) + geom_bar()
+ggplot(xvalResultsLinSVM, aes(x = best_cost)) + geom_bar()
+ggplot(xvalResultsLinSVM, aes(x = classifier, y = err)) + geom_boxplot()
 ```
 
 Typically, a cost of 3 is chosen as the best, but about 1/3 of the time 10 is chosen instead.
+
 
 # Problem 2 (10 points): comparison to random forest
 
@@ -87,9 +90,49 @@ rfCM
 
 The way random forest is built is already bootstrapped, so additional cross-validation is not necessary. It appears the performance is very good, even slightly better than the SVM classifier.
 
+``` {r randomForestError}
+rfErr <- 1 - sum(diag(rfCM)) / sum(rfCM)
+rfErr
+```
+
+``` {r randomForestResults}
+xvalResultsRF <- tibble(
+  classifier = "rf",
+  err = rfErr
+)
+```
+
 # Problem 3 (10 points): Comparison to cross-validation tuned KNN predictor
 
 Use convenience wrapper `tune.knn` provided by the library `e1071` on the entire dataset to determine optimal value for the number of the nearest neighbors 'k' to be used in KNN classifier.  Consider our observations from week 9 problem set when choosing range of values of `k` to be evaluated by `tune.knn`.  Setup resampling procedure similar to that used above for support vector classifier that will repeatedly: a) split banknote authentication dataset into training and test, b) use `tune.knn` on training data to determine optimal `k`, and c) use `k` estimated by `tune.knn` to make KNN classifications on test data.  Report and discuss distributions of test errors from this procedure and selected values of `k`, compare them to those obtained for random forest and support vector classifier above.
+
+``` {r knntunXval}
+ks <- c(3, 10, 30, 100, 300)
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(dbaDat)))
+xvalResultsKNN <- tibble()
+
+for (fold in 1:k) {
+  dbaTrain <- dbaDat[kfInd != fold, ]
+  dbaTest <- dbaDat[kfInd == fold, ]
+  
+  tune.out <- tune.knn(select(dbaTrain, -auth), dbaTrain$auth, k = ks)
+  
+  knnFit <- knn(select(dbaTrain, -auth), select(dbaTest, -auth), dbaTrain$auth, k = tune.out$best.parameters$k)
+  knnCM <- table(dbaTest$auth, predict(svmFit, dbaTest))
+  xvalResultsKNN <- rbind(xvalResultsKNN, tibble(
+    fold = fold,
+    classifier = "knn",
+    best_k = tune.out$best.parameters$k,
+    err = 1 - sum(diag(knnCM)) / sum(knnCM)
+  ))
+}
+
+ggplot(xvalResultsKNN, aes(x = best_k)) + geom_bar()
+ggplot(xvalResultsKNN, aes(x = classifier, y = err)) + geom_boxplot()
+```
+
+Accuracy between the best knn (with best k, usually 3 and sometimes 10) and the best svm with linear kernal is pretty similar. Most get only one or two classifications incorrect in a test set.
 
 
 # Problem 4 (20 points): SVM with radial kernel
@@ -98,12 +141,145 @@ Use convenience wrapper `tune.knn` provided by the library `e1071` on the entire
 
 *Plot* SVM model fit to the banknote authentication dataset using (for the ease of plotting) *only variance and skewness* as predictors variables, `kernel="radial"`, `cost=1` and `gamma=1` (see ISLR Ch.9.6.2 for an example of that done with a simulated dataset).  You should be able to see in the resulting plot the magenta-cyan classification boundary as computed by this model.  Produce the same kinds of plots using 0.01 and 100 as values of `gamma` also.  Compare classification boundaries between these three plots and describe how they are impacted by the change in the value of `gamma`.  Can you trace it back to the role of `gamma` in the equation introducing it with the radial kernel in ISLR?
 
+``` {r plotRadialSVM}
+gammas <- c(0.01, 0.1, 1, 10, 100)
+for (gamma in gammas) {
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "radial", cost = 1, gamma = gamma, scale = TRUE)
+  plot(svmFit, dbaDat, skew ~ var)
+  title(sub = paste("gamma =", gamma))
+}
+```
+
+As gamma increases, the area of space where points would be classified as "1" shrinks. At first the classification boundary is nearly linear, but it quickly becomes round and shrinks in size. I believe the gamma parameter is tuning how far away the "influence" of the "1" points reaches. As gamma gets higher and higher, the "1" classification area shrinks smaller and smaller into the maximum "influence" area of "1" classification.
 
 ## Sub-problem 4b (10 points): test error for SVM with radial kernel
 
 Similar to how it was done above for support vector classifier (and KNN), set up a resampling process that will repeatedly: a) split the entire dataset (using all attributes as predictors) into training and test datasets, b) use `tune` function to determine optimal values of `cost` and `gamma` and c) calculate test error using these values of `cost` and `gamma`.  You can start with `cost=c(1,2,5,10,20)` and `gamma=c(0.01,0.02,0.05,0.1,0.2)` as starting ranges to evaluate by `tune`, but please feel free to experiment with different sets of values and discuss the results of it and how you would go about selecting those ranges starting from scratch.  Present resulting test error graphically, compare it to that of support vector classifier (with linear kernel), random forest and KNN classifiers obtained above and discuss results of these comparisons. 
 
+``` {r svmRadialKernelXval}
+costs <- c(0.1, 0.3, 0.5, 1, 3, 10, 30, 100)
+gammas <- c(0.01, 0.02, 0.05, 0.1, 0.2)
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(dbaDat)))
+xvalResultsRadSVM <- tibble()
+
+for (fold in 1:k) {
+  dbaTrain <- dbaDat[kfInd != fold, ]
+  dbaTest <- dbaDat[kfInd == fold, ]
+  
+  tune.out <- tune(svm, auth ~ ., data = dbaTrain, kernel = "radial", scale = TRUE,
+                   ranges = list(cost = costs, gamma = gammas))
+  
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "radial", scale = TRUE,
+                cost = tune.out$best.parameters$cost, gamma = tune.out$best.parameters$gamma)
+  svmCM <- table(dbaTest$auth, predict(svmFit, dbaTest))
+  xvalResultsRadSVM <- rbind(xvalResultsRadSVM, tibble(
+    fold = fold,
+    classifier = "radsvm",
+    best_cost = tune.out$best.parameters$cost,
+    best_gamma = tune.out$best.parameters$gamma,
+    err = 1 - sum(diag(svmCM)) / sum(svmCM)
+  ))
+}
+
+ggplot(xvalResultsRadSVM, aes(x = best_cost)) + geom_bar()
+ggplot(xvalResultsRadSVM, aes(x = best_gamma)) + geom_bar()
+ggplot(xvalResultsRadSVM, aes(x = classifier, y = err)) + geom_boxplot()
+```
+
+The radial basis svm is perfect! Zero percent error. Clearly the ability of the radial basis function to have non-linear classification boundary is a huge boon to its classification performance. Below, I provide a graphical comparison of all of the techniques analyzed in this problem set.
+
 # Extra 10 points problem: SVM with polynomial kernel
 
 Repeat what was done above (plots of decision boundaries for various interesting values of tuning parameters and test error for their best values estimated from training data) using `kernel="polynomial"`.   Determine ranges of `coef0`, `degree`, `cost` and `gamma` to be evaluated by `tune`.  Present and discuss resulting test error and how it compares to linear and radial kernels and those of random forest and KNN.
 
+``` {r svmPolynomialKernelVisualizeGamma}
+gammas <- c(0.01, 0.1, 1, 10)
+for (gamma in gammas) {
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "radial", scale = TRUE,
+                cost = 1, gamma = gamma, degree = 2, coef0 = 0)
+  plot(svmFit, dbaDat, skew ~ var)
+  title(sub = paste("gamma =", gamma))
+}
+```
+
+``` {r svmPolynomialKernelVisualizeCost}
+costs <- c(1, 3, 10, 30, 100)
+for (cost in costs) {
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "radial", scale = TRUE,
+                cost = cost, gamma = 1, degree = 2, coef0 = 0)
+  plot(svmFit, dbaDat, skew ~ var)
+  title(sub = paste("cost =", cost))
+}
+```
+
+``` {r svmPolynomialKernelVisualizeDegree}
+degrees <- c(1, 2, 3)
+for (degree in degrees) {
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "radial", scale = TRUE,
+                cost = 10, gamma = 0.1, degree = degree, coef0 = 0)
+  plot(svmFit, dbaDat, skew ~ var)
+  title(sub = paste("degree =", degree))
+}
+```
+
+``` {r svmPolynomialKernelVisualizeCoef0}
+coef0s <- c(0, 0.5, 1)
+for (coef0 in coef0s) {
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "radial", scale = TRUE,
+                cost = 10, gamma = 0.1, degree = 2, coef0 = coef0)
+  plot(svmFit, dbaDat, skew ~ var)
+  title(sub = paste("coef0 =", coef0))
+}
+```
+
+``` {r svmPolynomialKernelXval}
+costs <- c(10, 30, 100)
+gammas <- c(0.08, 0.1, 0.12)
+degrees <- c(2, 3)
+coef0s <- c(0.005, 0.01, 0.03)
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(dbaDat)))
+xvalResultsPolySVM <- tibble()
+
+for (fold in 1:k) {
+  dbaTrain <- dbaDat[kfInd != fold, ]
+  dbaTest <- dbaDat[kfInd == fold, ]
+  
+  tune.out <- tune(svm, auth ~ ., data = dbaTrain, kernel = "polynomial", scale = TRUE,
+                   ranges = list(cost = costs, gamma = gammas, degree = degrees, coef0 = coef0s))
+  
+  svmFit <- svm(auth ~ ., data = dbaDat, kernel = "polynomial", scale = TRUE,
+                cost = tune.out$best.parameters$cost)
+  svmCM <- table(dbaTest$auth, predict(svmFit, dbaTest))
+  xvalResultsPolySVM <- rbind(xvalResultsPolySVM, tibble(
+    fold = fold,
+    classifier = "polysvm",
+    best_cost = tune.out$best.parameters$cost,
+    best_gamma = tune.out$best.parameters$gamma,
+    best_degree = tune.out$best.parameters$degree,
+    best_coef0 = tune.out$best.parameters$coef0,
+    err = 1 - sum(diag(svmCM)) / sum(svmCM)
+  ))
+}
+
+ggplot(xvalResultsPolySVM, aes(x = best_cost)) + geom_bar()
+ggplot(xvalResultsPolySVM, aes(x = best_gamma)) + geom_bar()
+ggplot(xvalResultsPolySVM, aes(x = best_degree)) + geom_bar()
+ggplot(xvalResultsPolySVM, aes(x = best_coef0)) + geom_bar()
+ggplot(xvalResultsPolySVM, aes(x = classifier, y = err)) + geom_boxplot()
+```
+
+``` {r compareClassifiers}
+xvalResultsComplete <- bind_rows(
+  xvalResultsLinSVM,
+  xvalResultsRadSVM,
+  xvalResultsPolySVM,
+  xvalResultsKNN,
+  xvalResultsRF
+)
+
+ggplot(xvalResultsComplete, aes(x = classifier, y = err)) + geom_boxplot()
+```
+
+All told, the radial basis svm was the best classifier, posting a 0% error rate for all ten simulations. After tuning, the polynomial svm is second best with a 0% error most of the time and occasional ~0.7% error. Random forest performs fairly well, and the linear svm and knn are the worst but still very good performers with usually a 1-2% error rate. 
