@@ -31,6 +31,20 @@ It is 100% up to you whether you want to upload your model predictions over the 
 
 Lastly, the size of this dataset can make some of the modeling techniques run slower than what we were typically encountering in this class.  You may find it helpful to do some of the exploration and model tuning on multiple random samples of smaller size as you decide on useful ranges of parameters/modeling choices, and then only perform a final run of fully debugged and working code on the full dataset.  Please see also the afterword below on the computational demands of this problem set.
 
+``` {r metricFunctions}
+calcAcc <- function (cm) {
+  sum(diag(cm)) / sum(cm)
+}
+
+calcSpecificity <- function (cm) {
+  cm[1, 1] / sum(cm[, 1])
+}
+
+calcSensitivity <- function (cm) {
+  cm[2, 2] / sum(cm[, 2])
+}
+```
+
 # Problem 1: univariate and unsupervised analysis (20 points)
 
 Download and read training and test data into R and prepare graphical and numerical summaries of it: e.g. histograms of continuous attributes, contingency tables of categorical variables, scatterplots of continuous attributes with some of the categorical variables indicated by color/symbol shape, etc.  Whatever you find helpful to think about properties of the data you are about to start using for fitting classification models.
@@ -66,12 +80,63 @@ First thing worth noting is that target no is about three times more common than
 
 ``` {r makeTrainData}
 trainData <- rawData %>%
-  mutate(e2 = eg == "e2")
+  mutate(
+    e2 = eg == "e2",
+    hw = log(hw + 1e-6)
+    )
 ```
 
 # Problem 2: logistic regression (20 points)
 
 Develop logistic regression model of the outcome `yn` as a function of multiple predictors in the model.  Which variables are significantly associated with the outcome?  Test model performance on multiple splits of data into training and test subsets and summarize it in terms of accuracy/error/sensitivity/specificity.
+
+``` {r testNumericCorrelation}
+trainData %>% 
+  select_if(is.numeric) %>% select(-id) %>% cbind(yn = as.numeric(trainData$yn)) %>% 
+  cor()
+```
+
+Decent correlation with yn and features cg, ag, and nc. Some of these features are also fairly well correlated with each other, especially cg and ag.
+
+``` {r fitSingleLR}
+lrFit <- glm(
+  yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+  data = trainData, family = binomial)
+
+summary(lrFit)
+```
+
+``` {r xvalLR}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsLR <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- trainData[kfInd != fold, ]
+  trainDataVal <- trainData[kfInd == fold, ]
+
+  lrFit <- glm(
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    data = trainDataFit, family = binomial)
+  
+  lrPredict <- predict(lrFit, newdata = trainDataVal, type = "response")
+  lrCM <- table(trainDataVal$yn, round(lrPredict))
+
+  xvalResultsLR <- rbind(xvalResultsLR, tibble(
+    fold = fold,
+    acc = calcAcc(lrCM),
+    sens = calcSensitivity(lrCM),
+    spec = calcSpecificity(lrCM),
+    model = "lr"
+  ))
+}
+```
+
+``` {r plotLRXval}
+xvalResultsLR %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
+```
+
 
 ## Extra points problem: interaction terms (5 extra points)
 
@@ -81,13 +146,118 @@ Assess the impact/significance of pairwise interaction terms for all pairwise co
 
 Fit linear discriminant analysis model of the outcome `yn` as a function of the rest of covariates in the dataset.  Feel free to decide whether you want to use all of them or a subset of those.  Test resulting model performance on multiple splits of the data into training and test subsets, summarize it in terms of accuracy/error/sensitivity/specificity and compare them to those obtained for logistic regression.
 
+``` {r xvalLDA}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsLDA <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- trainData[kfInd != fold, ]
+  trainDataVal <- trainData[kfInd == fold, ]
+
+  ldaFit <- lda(
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    data = trainDataFit)
+  
+  ldaPredict <- predict(ldaFit, newdata = trainDataVal)
+  ldaCM <- table(trainDataVal$yn, as.numeric(ldaPredict$x > 0))
+
+  xvalResultsLDA <- rbind(xvalResultsLDA, tibble(
+    fold = fold,
+    acc = calcAcc(ldaCM),
+    sens = calcSensitivity(ldaCM),
+    spec = calcSpecificity(ldaCM),
+    model = "lda"
+  ))
+}
+```
+
+``` {r plotLDAXval}
+xvalResultsLDA %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
+```
+
 ## Extra points problem: quadratic discriminant analysis (5 extra points)
 
 In our experience attempting to fit quadratic discriminant analysis model of the categorical outcome `yn` on this data results in a rank deficiency related error. Determine on how to correct this error and report resulting model training and test error/accuracy/etc. and how it compares to LDA and logistic regression above. 
 
+``` {r xvalQDA}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsQDA <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- trainData[kfInd != fold, ]
+  trainDataVal <- trainData[kfInd == fold, ]
+
+  qdaFit <- qda(
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    data = trainDataFit)
+  
+  qdaPredict <- predict(qdaFit, newdata = trainDataVal)
+  qdaCM <- table(trainDataVal$yn, qdaPredict$class)
+
+  xvalResultsQDA <- rbind(xvalResultsQDA, tibble(
+    fold = fold,
+    acc = calcAcc(qdaCM),
+    sens = calcSensitivity(qdaCM),
+    spec = calcSpecificity(qdaCM),
+    model = "lda"
+  ))
+}
+```
+
+``` {r plotLDAXval}
+xvalResultsQDA %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
+```
+
 # Problem 4: random forest (15 points)
 
 Develop random forest model of outcome `yn`. Present variable importance plots and comment on relative importance of different attributes in the model.  Did attributes showing up as more important in random forest model also appear as significantly associated with the outcome by logistic regression?  Test model performance on multiple splits of data into training and test subsets, compare test and out-of-bag error estimates, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of logistic regression and LDA models above.
+
+``` {r tryRF}
+rfFit <- randomForest(select(trainData, -yn), trainData$yn)
+```
+
+``` {r plotTopRFVars}
+rfFit$importance %>% as.tibble(rownames = "feature") %>%
+  ggplot(aes(x = feature, y = MeanDecreaseGini)) + geom_col()
+```
+
+``` {r xvalRF}
+  rfRes <- randomForest(probFourData$trainData, probFourData$trainClass, mtry = mtryVal)
+  rfTmpTbl <- table(probFourData$testClass,predict(rfRes,newdata=probFourData$testData))
+  probFourResults <- rbind(probFourResults, tibble(
+    classVars = classVar,
+    noiseVars = noiseVar,
+    classifier = paste("rf", mtryVal),
+    acc = sum(diag(rfTmpTbl)) / sum(rfTmpTbl)
+  ))
+
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsRF <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- trainData[kfInd != fold, ]
+  trainDataVal <- trainData[kfInd == fold, ]
+
+  qdaFit <- qda(
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    data = trainDataFit)
+  
+  qdaPredict <- predict(qdaFit, newdata = trainDataVal)
+  qdaCM <- table(trainDataVal$yn, qdaPredict$class)
+
+  xvalResultsQDA <- rbind(xvalResultsQDA, tibble(
+    fold = fold,
+    acc = calcAcc(qdaCM),
+    sens = calcSensitivity(qdaCM),
+    spec = calcSpecificity(qdaCM),
+    model = "lda"
+  ))
+}
+```
 
 # Problem 5: SVM (20 points)
 
