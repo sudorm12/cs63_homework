@@ -39,6 +39,35 @@ As it is often the case for such contests, the atributes in the dataset are blin
 
 Perform principal components analysis of this data (do you need to scale it prior to that? how would you represent multilevel categorical attributes to be used as inputs for PCA?) and plot observations in the space of the first few principal components indicating levels of some of the categorical attributes of your choosing by the color/shape of the symbol.  Perform univariate assessment of associations between outcome we will be modeling and each of the attributes (e.g. t-test or logistic regression for continuous attributes, contingency tables/Fisher exact test/$\chi^2$ test for categorical attributes).  Summarize your observations from these assessments: does it appear that there are predictors associated with the outcome `yn` univariately? Which predictors seem to be more/less relevant?
 
+``` {r loadData}
+rawData <- read_csv("final-data-train.csv") %>% mutate_if(is.character, as.factor)
+```
+
+``` {r summarizeData}
+head(rawData)
+summary(rawData)
+```
+
+
+``` {r numericPairsPlot}
+rawData %>% select_if(is.numeric) %>% select(-id) %>% pairs(col = c("black", "red")[rawData$yn])
+```
+
+Columns ag and cg seem to have pretty good correlation to the target. Something interesting is happening in coumn cl, where many rows have value zero and non-zero quantities seem to be between 1 and about 1.7. It seems like column hw would benefit from log transformation. I don't think it would benefit from conversion to categorical though, there seems to be some amount of correlation between the value and the target.
+
+``` {r catContingencyTable}
+for (catRow in select_if(rawData, is.factor)) {
+  print(table(rawData$yn, catRow))
+}
+```
+
+First thing worth noting is that target no is about three times more common than a target yes. Feature se seems to have pretty good correlation and is only two levels. It seems also that most target no samples have eg of e2, which may be helpful. There may be some correlations with the other factors but it's difficult to tell with both the class imbalance and the higher number of factors.
+
+
+``` {r makeTrainData}
+trainData <- rawData %>%
+  mutate(e2 = eg == "e2")
+```
 
 # Problem 2: logistic regression (20 points)
 
