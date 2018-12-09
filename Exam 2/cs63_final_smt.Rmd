@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(randomForest)
 library(MASS)
 library(class)
+library(e1071)
 library(tidyverse)
 ```
 
@@ -202,7 +203,7 @@ for (fold in 1:k) {
     acc = calcAcc(qdaCM),
     sens = calcSensitivity(qdaCM),
     spec = calcSpecificity(qdaCM),
-    model = "lda"
+    model = "qda"
   ))
 }
 ```
@@ -222,19 +223,12 @@ rfFit <- randomForest(select(trainData, -yn), trainData$yn)
 
 ``` {r plotTopRFVars}
 rfFit$importance %>% as.tibble(rownames = "feature") %>%
-  ggplot(aes(x = feature, y = MeanDecreaseGini)) + geom_col()
+  ggplot(aes(x = fct_reorder(feature, MeanDecreaseGini, .desc = TRUE), y = MeanDecreaseGini)) + 
+  geom_col()
 ```
 
 ``` {r xvalRF}
-  rfRes <- randomForest(probFourData$trainData, probFourData$trainClass, mtry = mtryVal)
-  rfTmpTbl <- table(probFourData$testClass,predict(rfRes,newdata=probFourData$testData))
-  probFourResults <- rbind(probFourResults, tibble(
-    classVars = classVar,
-    noiseVars = noiseVar,
-    classifier = paste("rf", mtryVal),
-    acc = sum(diag(rfTmpTbl)) / sum(rfTmpTbl)
-  ))
-
+k <- 10
 kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
 xvalResultsRF <- tibble()
 
@@ -242,32 +236,58 @@ for (fold in 1:k) {
   trainDataFit <- trainData[kfInd != fold, ]
   trainDataVal <- trainData[kfInd == fold, ]
 
-  qdaFit <- qda(
-    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
-    data = trainDataFit)
+  rfFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn)
   
-  qdaPredict <- predict(qdaFit, newdata = trainDataVal)
-  qdaCM <- table(trainDataVal$yn, qdaPredict$class)
+  rfPredict <- predict(rfFit, newdata = select(trainDataVal, -yn))
+  rfCM <- table(trainDataVal$yn, rfPredict)
 
-  xvalResultsQDA <- rbind(xvalResultsQDA, tibble(
+  xvalResultsRF <- rbind(xvalResultsRF, tibble(
     fold = fold,
-    acc = calcAcc(qdaCM),
-    sens = calcSensitivity(qdaCM),
-    spec = calcSpecificity(qdaCM),
-    model = "lda"
+    acc = calcAcc(rfCM),
+    sens = calcSensitivity(rfCM),
+    spec = calcSpecificity(rfCM),
+    model = "rf"
   ))
 }
+```
+
+``` {r plotRFXval}
+xvalResultsRF %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
 # Problem 5: SVM (20 points)
 
 Develop SVM model of categorical outcome `yn` deciding on the choice of kernel, cost, etc. that appear to yield better performance.  Test model performance on multiple splits of data into training and test subsets, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of the rest of the models developed above (logistic regression, LDA, random forest).
 
+``` {r tuneSVM}
+costs <- c(0.1, 1, 10) #c(0.1, 0.3, 0.5, 1, 3, 10, 30, 100)
+gammas <- c(0.01, 0.1) #c(0.01, 0.02, 0.05, 0.1, 0.2)
+
+# tune.out <- tune(svm, yn ~ ., data = trainData, kernel = "radial", scale = TRUE, ranges = list(cost = costs, gamma = gammas))
+
+svmFit <- svm(yn ~ ., data = trainData, kernel = "radial", scale = TRUE,
+              cost = 1, gamma = 0.1)
+```
+
 # Problem 6: predictions for test dataset  (10 points)
 
 ## Problem 6a: compare logistic regression, LDA, random forest and SVM model performance (3 points)
 
 Compare performance of the models developed above (logistic regression, LDA, random forest, SVM) in terms of their accuracy, error and sensitivity/specificity.  Comment on differences and similarities between them.
+
+``` {r compareXval}
+xvalResults <- bind_rows(
+  xvalResultsLR,
+  xvalResultsLDA,
+  xvalResultsQDA,
+  xvalResultsRF
+)
+
+xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = fct_reorder(model, value, .desc = TRUE), y = value, col = metric)) +
+  geom_boxplot()
+```
 
 ## Problem 6b: make predictions for the **test** dataset (3 points)
 
