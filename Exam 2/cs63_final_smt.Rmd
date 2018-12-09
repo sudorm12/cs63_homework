@@ -208,7 +208,7 @@ for (fold in 1:k) {
 }
 ```
 
-``` {r plotLDAXval}
+``` {r plotQDAXval}
 xvalResultsQDA %>% gather(key = metric, value = value, -c(fold, model)) %>% 
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
@@ -274,7 +274,7 @@ tune.out <- tune(svm, yn ~ cg + fw + cl + hw + nc + ag + e2 + se, data = trainDa
 summary(tune.out)
 ```
 
-``` {r plotSVMXval}
+``` {r xvalSVM}
 k <- 10
 kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
 xvalResultsSVM <- tibble()
