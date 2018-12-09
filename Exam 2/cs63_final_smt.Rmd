@@ -261,13 +261,48 @@ xvalResultsRF %>% gather(key = metric, value = value, -c(fold, model)) %>%
 Develop SVM model of categorical outcome `yn` deciding on the choice of kernel, cost, etc. that appear to yield better performance.  Test model performance on multiple splits of data into training and test subsets, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of the rest of the models developed above (logistic regression, LDA, random forest).
 
 ``` {r tuneSVM}
-costs <- c(0.1, 1, 10) #c(0.1, 0.3, 0.5, 1, 3, 10, 30, 100)
-gammas <- c(0.01, 0.1) #c(0.01, 0.02, 0.05, 0.1, 0.2)
+costs <- c(2.5, 3, 3.5) #c(0.1, 0.3, 0.5, 1, 3, 10, 30, 100)
+#gammas <- c(0.01, 0.1) #c(0.01, 0.02, 0.05, 0.1, 0.2)
 
-# tune.out <- tune(svm, yn ~ ., data = trainData, kernel = "radial", scale = TRUE, ranges = list(cost = costs, gamma = gammas))
+tune.out <- tune(svm, yn ~ cg + fw + cl + hw + nc + ag + e2 + se, data = trainData, 
+                 kernel = "linear", scale = TRUE, 
+                 ranges = list(cost = costs))
 
-svmFit <- svm(yn ~ ., data = trainData, kernel = "radial", scale = TRUE,
-              cost = 1, gamma = 0.1)
+```
+
+``` {r tuneSVMSummary}
+summary(tune.out)
+```
+
+``` {r plotSVMXval}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsSVM <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- trainData[kfInd != fold, ]
+  trainDataVal <- trainData[kfInd == fold, ]
+
+  svmFit <- svm(yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+                data = trainDataFit, kernel = "linear", scale = TRUE,
+                cost = 3)
+  
+  svmPredict <- predict(svmFit, trainDataVal)
+  svmCM <- table(trainDataVal$yn, svmPredict)
+
+  xvalResultsSVM <- rbind(xvalResultsSVM, tibble(
+    fold = fold,
+    acc = calcAcc(svmCM),
+    sens = calcSensitivity(svmCM),
+    spec = calcSpecificity(svmCM),
+    model = "lin-svm"
+  ))
+}
+```
+
+``` {r plotSVMXval}
+xvalResultsSVM %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
 # Problem 6: predictions for test dataset  (10 points)
@@ -281,7 +316,8 @@ xvalResults <- bind_rows(
   xvalResultsLR,
   xvalResultsLDA,
   xvalResultsQDA,
-  xvalResultsRF
+  xvalResultsRF,
+  xvalResultsSVM
 )
 
 xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>% 
