@@ -7,12 +7,13 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(glmnet)
 library(randomForest)
 library(MASS)
 library(class)
 library(e1071)
-library(tidyverse)
 library(dummies)
+library(tidyverse)
 ```
 
 # Preface
@@ -119,9 +120,11 @@ biplot(pcaFit, pc.biplot = TRUE)
 ```
 
 ``` {r plotCategoriesWithPCA}
-for (factorCat in select_if(trainData, is.factor)) {
-  pairs(pcaFit$x[, 1:3], col = factorCat)
-  title(levels(factorCat))
+factorColNames <- colnames(select_if(trainData, is.factor))
+
+for (factorColName in factorColNames) {
+  pairs(pcaFit$x[, 1:3], col = trainData[[factorColName]])
+  title(factorColName)
 }
 ```
 
@@ -130,8 +133,10 @@ k <- 10
 kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
 xvalResultsLRSV <- tibble()
 
+numericColNames <- colnames(select(select_if(trainData, is.numeric), -id))
+
 for (fold in 1:k) {
-  for (numericColName in colnames(select(select_if(trainData, is.numeric), -id))) {
+  for (numericColName in numericColNames) {
     singleVarData <- bind_cols(
       var = trainData[, numericColName],
       yn = trainData[, "yn"]
@@ -193,7 +198,7 @@ for (fold in 1:k) {
   trainDataVal <- trainData[kfInd == fold, ]
 
   lrFit <- glm(
-    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se + clz, 
     data = trainDataFit, family = binomial)
   
   lrPredict <- predict(lrFit, newdata = trainDataVal, type = "response")
@@ -218,6 +223,72 @@ xvalResultsLR %>% gather(key = metric, value = value, -c(fold, model)) %>%
 ## Extra points problem: interaction terms (5 extra points)
 
 Assess the impact/significance of pairwise interaction terms for all pairwise combinations of covariates used in the model and report the top ten that most significantly improve model fit.
+
+``` {r generateInteractionTerms}
+numSubsetData <- bind_cols(
+  select(trainData, yn),
+  select_if(trainData, is.numeric),
+) %>% select(-id)
+
+lmFit <- glm(yn ~ . + .*., data = numSubsetData, family = binomial)
+summary(lmFit)
+```
+
+```{r predictRegsubsets}
+# taken from homework 5, which was in turn taken from ISLR lab 6.5.3
+predict.regsubsets <- function (object, newdata, id, ...){
+  form=as.formula(object$call [[2]])
+  mat=model.matrix(form,newdata)
+  coefi=coef(object,id=id)
+  xvars=names (coefi)
+  mat[,xvars] %*% coefi
+}
+```
+
+``` {r interactOptimalSet}
+selectMethods <- c("exhaustive", "backward", "forward", "seqrep")
+fitMetrics <- c("rsq","rss","adjr2","bic")
+nVars <- ncol(numSubsetData) - 1 + ncol(combn(colnames(select(numSubsetData, -yn)), 2))
+selectWhichInteract <- NULL
+selectMetricsInteract <- NULL
+
+for (method in selectMethods) {
+  # fit using each method of determining subsets and save summary of results
+  selectFit <- regsubsets(yn ~ . + .*., numSubsetData, method=method, nvmax=nVars)
+  selectSummary <- summary(selectFit)
+  
+  # extract which features are used for each number of variables and save with method
+  selectWhich <- as.tibble(selectSummary$which)
+  selectWhich$method <- method
+  selectWhich$vars <- 1:nVars
+  selectWhichInteract <- rbind(selectWhichInteract, selectWhich)
+  
+  # extract fit quality metrics for each number of variables and save with method
+  selectMetrics <- as.tibble(selectSummary[fitMetrics])
+  selectMetrics$method <- method
+  selectMetrics$vars <- 1:nVars
+  selectMetricsInteract <- rbind(selectMetricsInteract, selectMetrics)
+}
+
+selectMetricsInteract <- selectMetricsInteract %>% 
+  gather(key = metric, value = value, fitMetrics)
+```
+
+``` {r interactPlotOptimalMetrics}
+ggplot(selectMetricsInteract, aes(x = vars,y = value,shape = method,colour = method)) + 
+  geom_path() + 
+  geom_point() + 
+  facet_wrap(~metric,scales="free") + 
+  theme(legend.position="top")
+```
+
+``` {r interactPlotSelectedVars}
+plotWhich <- selectWhichInteract %>% 
+  gather(key = param, value = selected, -c(method, vars))
+ggplot(plotWhich, aes(x = vars, y = param, fill = selected)) + 
+  geom_tile() + 
+  facet_wrap(~method)
+```
 
 # Problem 3: linear discriminant analysis (15 points)
 
