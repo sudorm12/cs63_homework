@@ -182,7 +182,7 @@ Decent correlation with yn and features cg, ag, and nc. Some of these features a
 
 ``` {r fitSingleLR}
 lrFit <- glm(
-  yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+  yn ~ cg + fw + cl + hw + nc + ag + e2 + se + clz, 
   data = trainData, family = binomial)
 
 summary(lrFit)
@@ -296,9 +296,49 @@ selectWhichInteract %>%
   group_by(param) %>% 
   summarize(sum = sum(selected)) %>%
   arrange(desc(sum)) %>%
-  head(10) %>%
+  head(15) %>%
   ggplot(aes(x = fct_reorder(param, sum, .desc = TRUE), y = sum)) + geom_col()
 ```
+
+``` {r fitSingleIntLR}
+lrFit <- glm(
+  yn ~ cg + fw + cl + hw + nc + ag + e2 + se + cl*nc + cg*ag + cl*ag, 
+  data = trainData, family = binomial)
+
+summary(lrFit)
+```
+
+``` {r xvalIntLR}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsLRInt <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- trainData[kfInd != fold, ]
+  trainDataVal <- trainData[kfInd == fold, ]
+
+  lrFit <- glm(
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se + clz + + cl*nc + cg*ag + cl*ag, 
+    data = trainDataFit, family = binomial)
+  
+  lrPredict <- predict(lrFit, newdata = trainDataVal, type = "response")
+  lrCM <- table(trainDataVal$yn, round(lrPredict))
+
+  xvalResultsLRInt <- rbind(xvalResultsLRInt, tibble(
+    fold = fold,
+    acc = calcAcc(lrCM),
+    sens = calcSensitivity(lrCM),
+    spec = calcSpecificity(lrCM),
+    model = "lr-int"
+  ))
+}
+```
+
+``` {r plotIntLRXval}
+xvalResultsLRInt %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
+```
+
 
 # Problem 3: linear discriminant analysis (15 points)
 
@@ -471,6 +511,7 @@ Compare performance of the models developed above (logistic regression, LDA, ran
 ``` {r compareXval}
 xvalResults <- bind_rows(
   xvalResultsLR,
+  xvalResultsLRInt,
   xvalResultsLDA,
   xvalResultsQDA,
   xvalResultsRF,
