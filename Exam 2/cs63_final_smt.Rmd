@@ -12,6 +12,7 @@ library(MASS)
 library(class)
 library(e1071)
 library(tidyverse)
+library(dummies)
 ```
 
 # Preface
@@ -42,7 +43,12 @@ calcSpecificity <- function (cm) {
 }
 
 calcSensitivity <- function (cm) {
-  cm[2, 2] / sum(cm[, 2])
+  if (ncol(cm) == 2) {
+    cm[2, 2] / sum(cm[, 2])
+  }
+  else {
+    0
+  }
 }
 ```
 
@@ -70,6 +76,18 @@ rawData %>% select_if(is.numeric) %>% select(-id) %>% pairs(col = c("black", "re
 
 Columns ag and cg seem to have pretty good correlation to the target. Something interesting is happening in coumn cl, where many rows have value zero and non-zero quantities seem to be between 1 and about 1.7. It seems like column hw would benefit from log transformation. I don't think it would benefit from conversion to categorical though, there seems to be some amount of correlation between the value and the target.
 
+``` {r clCor}
+rawData %>% select_if(is.numeric) %>% select(-id) %>% filter(cl != 0) %>% cor() %>% .[,"cl"]
+```
+
+``` {r clFix}
+clLRFit <- glm(cl ~ cg + ag, data = filter(rawData, cl != 0))
+newcl <- predict(clLRFit, newdata = filter(rawData, cl == 0))
+
+summary(clLRFit)
+plot(clLRFit)
+```
+
 ``` {r catContingencyTable}
 for (catRow in select_if(rawData, is.factor)) {
   print(table(rawData$yn, catRow))
@@ -83,9 +101,67 @@ First thing worth noting is that target no is about three times more common than
 trainData <- rawData %>%
   mutate(
     e2 = eg == "e2",
+    clz = cl == 0,
     hw = log(hw + 1e-6)
     )
+trainData[trainData$cl == 0, "cl"] <- newcl
+
+trainDataDummies <- as.tibble(dummy.data.frame(as.data.frame(select(trainData, -yn))))
 ```
+
+``` {r pca}
+pcaFit <- prcomp(trainDataDummies, scale. = TRUE)
+plot(pcaFit)
+```
+
+``` {r pcaPlot}
+biplot(pcaFit, pc.biplot = TRUE)
+```
+
+``` {r plotCategoriesWithPCA}
+for (factorCat in select_if(trainData, is.factor)) {
+  pairs(pcaFit$x[, 1:3], col = factorCat)
+  title(levels(factorCat))
+}
+```
+
+``` {r xvalSingleVar}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
+xvalResultsLRSV <- tibble()
+
+for (fold in 1:k) {
+  for (numericColName in colnames(select(select_if(trainData, is.numeric), -id))) {
+    singleVarData <- bind_cols(
+      var = trainData[, numericColName],
+      yn = trainData[, "yn"]
+    ) %>% mutate(yn = as.numeric(yn) - 1)
+    trainDataFit <- singleVarData[kfInd != fold, ]
+    trainDataVal <- singleVarData[kfInd == fold, ]
+  
+    lrFit <- glm(
+      yn ~ ., 
+      data = trainDataFit)
+    
+    lrPredict <- predict(lrFit, newdata = trainDataVal, type = "response")
+    lrCM <- table(trainDataVal$yn, round(lrPredict))
+  
+    xvalResultsLRSV <- rbind(xvalResultsLRSV, tibble(
+      fold = fold,
+      acc = calcAcc(lrCM),
+      sens = calcSensitivity(lrCM),
+      spec = calcSpecificity(lrCM),
+      model = paste("lr", numericColName, sep = "-")
+    ))
+  }
+}
+```
+
+``` {r plotLRSVXval}
+xvalResultsLRSV %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
+```
+
 
 # Problem 2: logistic regression (20 points)
 
