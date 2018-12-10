@@ -290,6 +290,16 @@ ggplot(plotWhich, aes(x = vars, y = param, fill = selected)) +
   facet_wrap(~method)
 ```
 
+``` {r showBestSelectedVars}
+selectWhichInteract %>% 
+  gather(key = param, value = selected, -c(method, vars)) %>% 
+  group_by(param) %>% 
+  summarize(sum = sum(selected)) %>%
+  arrange(desc(sum)) %>%
+  head(10) %>%
+  ggplot(aes(x = fct_reorder(param, sum, .desc = TRUE), y = sum)) + geom_col()
+```
+
 # Problem 3: linear discriminant analysis (15 points)
 
 Fit linear discriminant analysis model of the outcome `yn` as a function of the rest of covariates in the dataset.  Feel free to decide whether you want to use all of them or a subset of those.  Test resulting model performance on multiple splits of the data into training and test subsets, summarize it in terms of accuracy/error/sensitivity/specificity and compare them to those obtained for logistic regression.
