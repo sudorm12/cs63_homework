@@ -342,6 +342,14 @@ xvalResultsLRInt %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+``` {r dataWithInteractions}
+moreData <- trainDataDummies %>%
+  mutate(
+    clnc = cl * nc,
+    cgag = cg * ag,
+    clag = cl * ag
+  )
+```
 
 # Problem 3: linear discriminant analysis (15 points)
 
@@ -635,15 +643,6 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
 ## Problem 6b: make predictions for the **test** dataset (3 points)
 
 Decide on the model that performs the best and use it to make predictions for the **test** dataset.  This is the dataset that is provided separately from training data without the outcome `yn` that we are modeling here.  Upload resulting predictions in comma-separated values (CSV) format into the Canvas website.  Please check sample files with test dataset predictions for the expected format of the *.csv file with predictions.
-
-``` {r dataWithInteractions}
-moreData <- trainDataDummies %>%
-  mutate(
-    clnc = cl * nc,
-    cgag = cg * ag,
-    clag = cl * ag
-  )
-```
 
 ``` {r tryRFM}
 rfFit <- randomForest(select(moreData, -yn), moreData$yn)
