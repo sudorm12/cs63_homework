@@ -114,7 +114,7 @@ trainDataDummies <- as.tibble(dummy.data.frame(as.data.frame(select(trainData, -
 ```
 
 ``` {r pca}
-pcaFit <- prcomp(trainDataDummies, scale. = TRUE)
+pcaFit <- prcomp(select(trainDataDummies, -yn), scale. = TRUE)
 plot(pcaFit)
 ```
 
@@ -505,6 +505,111 @@ xvalResultsSVM %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+# Extra 10 points: neural network model
+
+Experiment with fitting neural network models of categorical outcome `yn` for this data and evaluate their performance on different splits of the data into training and test. Compare model performance to that for the rest of classifiers developed above.
+
+``` {r resampleData}
+yesRows <- moreData %>% filter(yn == "yes") 
+resampData <- yesRows %>% 
+  .[sample(1:nrow(yesRows), nrow(moreData) - 2 * nrow(yesRows), replace=TRUE), ] %>% 
+  bind_rows(moreData) %>% 
+  mutate(ynn = as.numeric(yn) - 1) %>% 
+  select_if(negate(is.factor)) %>% 
+  select(-id)
+
+resampData %>% count(ynn)
+```
+
+``` {r buildNeuralNet}
+model <- keras_model_sequential()
+model %>% 
+  layer_dense(units = 128, activation = "relu", input_shape = ncol(resampData) - 1, name = "dense_1") %>%
+  layer_dropout(rate = 0.3, name = "dropout_1") %>%
+  layer_dense(units = 32, activation = "relu", name = "dense_2") %>%
+  layer_dropout(rate = 0.3, name = "dropout_2") %>%
+  layer_dense(units = 1, activation = "sigmoid", name = "dense_final")
+
+summary(model)
+```
+
+``` {r tryNeuralNet}
+model %>% compile(
+  loss = loss_binary_crossentropy,
+  optimizer = optimizer_adam(),
+  metrics = c('accuracy')
+)
+
+history <- model %>% fit(
+  x = as.matrix(resampData %>% select(-ynn)), 
+  y = as.matrix(resampData %>% select(ynn)), 
+  epochs = 50, batch_size = 512, validation_split = 0.2
+)
+```
+
+``` {r xvalNN}
+k <- 10
+kfInd <- sample(rep(c(1:k),length.out=nrow(resampData)))
+xvalResultsNN <- tibble()
+
+for (fold in 1:k) {
+  trainDataFit <- resampData[kfInd != fold, ]
+  trainDataVal <- resampData[kfInd == fold, ]
+  
+  model <- keras_model_sequential()
+  model %>% 
+    layer_dense(units = 128, activation = "relu", input_shape = ncol(trainDataFit) - 1, name = "dense_1") %>%
+    layer_dropout(rate = 0.3, name = "dropout_1") %>%
+    layer_dense(units = 32, activation = "relu", name = "dense_2") %>%
+    layer_dropout(rate = 0.3, name = "dropout_2") %>%
+    layer_dense(units = 1, activation = "sigmoid", name = "dense_final")
+  
+  model %>% compile(
+    loss = loss_binary_crossentropy,
+    optimizer = optimizer_adam(),
+    metrics = c('accuracy')
+  )
+  
+  history <- model %>% fit(
+    x = as.matrix(trainDataFit %>% select(-ynn)), 
+    y = as.matrix(trainDataFit %>% select(ynn)), 
+    epochs = 50, batch_size = 512, verbose = 0
+  )
+  
+  nnPredict <- model %>% predict_classes(as.matrix(trainDataVal %>% select(-ynn)))
+  nnCM <- table(trainDataVal$ynn, nnPredict)
+
+  xvalResultsNN <- rbind(xvalResultsNN, tibble(
+    fold = fold,
+    acc = calcAcc(nnCM),
+    sens = calcSensitivity(nnCM),
+    spec = calcSpecificity(nnCM),
+    model = "nn"
+  ))
+}
+```
+
+``` {r plotNNXval}
+xvalResultsNN %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
+```
+
+``` {r compareXvalToNN}
+xvalResults <- bind_rows(
+  xvalResultsLR,
+  xvalResultsLRInt,
+  xvalResultsLDA,
+  xvalResultsQDA,
+  xvalResultsRF,
+  xvalResultsSVM,
+  xvalResultsNN
+)
+
+xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>% 
+  ggplot(aes(x = fct_reorder(model, value, .desc = TRUE), y = value, col = metric)) +
+  geom_boxplot()
+```
+
 # Problem 6: predictions for test dataset  (10 points)
 
 ## Problem 6a: compare logistic regression, LDA, random forest and SVM model performance (3 points)
@@ -518,7 +623,8 @@ xvalResults <- bind_rows(
   xvalResultsLDA,
   xvalResultsQDA,
   xvalResultsRF,
-  xvalResultsSVM
+  xvalResultsSVM,
+  xvalResultsNN
 )
 
 xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>% 
@@ -544,7 +650,9 @@ rfFit <- randomForest(select(moreData, -yn), moreData$yn)
 ```
 
 ``` {r plotTopRFMVars}
-rfFit$importance %>% as.tibble(rownames = "feature") %>%
+rfFit$importance %>% as.tibble(rownames = "feature") %>% 
+  arrange(desc(MeanDecreaseGini)) %>%
+  head(20) %>%
   ggplot(aes(x = fct_reorder(feature, MeanDecreaseGini, .desc = TRUE), y = MeanDecreaseGini)) + 
   geom_col()
 ```
@@ -586,7 +694,8 @@ xvalResults <- bind_rows(
   xvalResultsLRInt,
   xvalResultsRF,
   xvalResultsRFM,
-  xvalResultsSVM
+  xvalResultsSVM,
+  xvalResultsNN
 )
 
 xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>% 
@@ -594,44 +703,13 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
   geom_boxplot()
 ```
 
+
+
+
 ## Problem 6c: get better than coin flip by 10% (4 points)
 
 This is not really a problem *per se* but rather a criterion we will go by assessing quality of your predictions for the test dataset.  You get these four points if your predictions for **test** dataset are better than those obtained from a fair coin flip (already shown in leaderboard and as examples of the file format for predictions upload) by at least 10% on **all** four metrics shown in the leaderboard (accuracy, sensitivity, specificity and precision).  But then predictions by the coin flip should not be very difficult to improve upon.  
 
-# Extra 10 points: neural network model
-
-Experiment with fitting neural network models of categorical outcome `yn` for this data and evaluate their performance on different splits of the data into training and test. Compare model performance to that for the rest of classifiers developed above.
-
-``` {r resampleData}
-yesRows <- trainData %>% filter(yn == "yes") 
-resampData <- yesRows %>% .[sample(1:nrow(yesRows), nrow(trainData) - 2 * nrow(yesRows), replace=TRUE), ] %>% bind_rows(moreData) %>% select_if(-is.factor)
-```
-
-``` {r buildNeuralNet}
-model <- keras_model_sequential()
-model %>% 
-  layer_dense(units = 128, activation = "tanh", input_shape = ncol(resampData) - 1) %>%
-  layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 32, activation = "tanh") %>%
-  layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 1, activation = "sigmoid")
-
-summary(model)
-```
-
-``` {r tryNeuralNet}
-model %>% compile(
-  loss = loss_binary_crossentropy,
-  optimizer = optimizer_rmsprop(),
-  metrics = c('accuracy')
-)
-
-history <- model %>% fit(
-  x = as.matrix(resampData %>% select(-yn)), 
-  y = as.matrix(resampData %>% select(yn) %>% mutate(yn = as.numeric(yn) - 1)), 
-  epochs = 30, batch_size = 128, validation_split = 0.2
-)
-```
 
 # An afterword on the computational demands of the final exam
 
