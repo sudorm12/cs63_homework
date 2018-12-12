@@ -96,10 +96,17 @@ rawData %>% mutate(eg2 = eg == "e2", yn = yn == "yes") %>% select(yn, eg2) %>% c
 
 It definitely appears that e2 can provide some value in predicting yn.
 
+``` {r vrmCor}
+rawData %>% mutate(sevrm = se == "vrm", yn = yn == "yes") %>% select(yn, sevrm) %>% cor()
+```
+
+And se can provide some value as well.
+
 In order to fix column cl, I'll use correlated features to fit a linear regression on the non-zero-valued samples of cl and predict values to replace the zero-valued samples.
 
 ``` {r clCor}
-rawData %>% select_if(is.numeric) %>% select(-id) %>% filter(cl != 0) %>% cor() %>% .[,"cl"]
+rawData %>% select_if(is.numeric) %>% select(-id) %>% filter(cl != 0) %>% 
+  cor() %>% .[,"cl"] %>% sort(decreasing = TRUE)
 ```
 
 Looks like cg and ag are our best bet.
@@ -114,12 +121,13 @@ plot(clLRFit)
 
 Not an incredible fit, but it will do better than all zeroes.
 
-Now, I'll create logical features which flag when `eg = "e2"` and `cl == 0`, log-transform hw, and replace zero-valued cl samples with the above predicted values. I also create a tbl where the factor columns have been replaced with numeric dummy columns.
+Now, I'll create logical features which flag when `eg = "e2"` and `se == "vrm"` and `cl == 0`, log-transform hw, and replace zero-valued cl samples with the above predicted values. I also create a tbl where the factor columns have been replaced with numeric dummy columns.
 
 ``` {r makeTrainData}
 trainData <- rawData %>%
   mutate(
     e2 = eg == "e2",
+    sev = se == "vrm"
     clz = cl == 0,
     hw = log(hw + 1e-6)
     )
@@ -153,7 +161,7 @@ for (factorColName in factorColNames) {
 }
 ```
 
-The data takes an interesting shape. There is definitely one large mass, and one much smaller mass of points. The small mass is all classified the same yn value. The larger mass also seems to be split into two attached masses.
+The data takes an interesting shape. There is definitely one large mass, and one much smaller mass of points. The small mass is all classified the same yn value. The larger mass also seems to be split into two attached masses. Some of the other categorical features also seem to split the data nicely, such as eg, ra, se, and wc.
 
 Let's try fitting some single variable logistic regressions on this data to get a sense for which numeric features have predictive power on their own.
 
@@ -202,6 +210,8 @@ Some, such as ag and cl, are actually fairly decent on their own. Several have v
 # Problem 2: logistic regression (20 points)
 
 > Develop logistic regression model of the outcome `yn` as a function of multiple predictors in the model.  Which variables are significantly associated with the outcome?  Test model performance on multiple splits of data into training and test subsets and summarize it in terms of accuracy/error/sensitivity/specificity.
+
+Which features have high correlation with the target?
 
 ``` {r testNumericCorrelationOnYn}
 trainData %>% 
@@ -260,7 +270,7 @@ xvalResultsLR %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
-This logistic regression performs surprisingly well, scoring around a 90% validation accuracy with similar levels of sensitivity and specificity. 
+This logistic regression performs surprisingly well, scoring around a 90% validation accuracy with similar levels of sensitivity and specificity. Many of the predictors are significant, including cg, cl, nc, e2.
 
 
 ## Extra points problem: interaction terms (5 extra points)
@@ -330,12 +340,14 @@ ggplot(selectMetricsInteract, aes(x = vars,y = value,shape = method,colour = met
 ```
 
 ``` {r interactPlotSelectedVars}
-plotWhich <- selectWhichInteract %>% 
+selectWhichInteract %>% 
   gather(key = param, value = selected, -c(method, vars)) %>%
   ggplot(aes(x = vars, y = param, fill = selected)) + 
   geom_tile() + 
   facet_wrap(~method)
 ```
+
+This chart is a little difficult to read, but it's possible to tell that several features such as cg, nc, cl:nc, and hw are often selected first. What are the most commonly selected at any level?
 
 ``` {r showBestSelectedVars}
 selectWhichInteract %>% 
@@ -347,9 +359,11 @@ selectWhichInteract %>%
   ggplot(aes(x = fct_reorder(param, sum, .desc = TRUE), y = sum)) + geom_col()
 ```
 
+It appears the selections drop off after cg:hw. Let's try fitting a logistic regression with all features up to that point.
+
 ``` {r fitSingleIntLR}
 lrFit <- glm(
-  yn ~ cg + nc + cl*nc + hw + cl + cg*ag + cl*ag + ag + cg*hw + e2 + clz, 
+  yn ~ cg + nc + cl*nc + hw + cl + cg*ag + cl*ag + ag + cg*hw + e2 + clz + se, 
   data = trainData, family = binomial)
 
 summary(lrFit)
@@ -365,7 +379,7 @@ for (fold in 1:k) {
   trainDataVal <- trainData[kfInd == fold, ]
 
   lrFit <- glm(
-    yn ~ cg + nc + cl*nc + hw + cl + cg*ag + cl*ag + ag + e2 + clz, 
+    yn ~ cg + nc + cl*nc + hw + cl + cg*ag + cl*ag + ag + cg*hw + e2 + clz + se, 
     data = trainDataFit, family = binomial)
   
   lrPredict <- predict(lrFit, newdata = trainDataVal, type = "response")
@@ -385,6 +399,8 @@ for (fold in 1:k) {
 xvalResultsLRInt %>% gather(key = metric, value = value, -c(fold, model)) %>% 
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
+
+The fit is good, but not significantly better than the logistic regression without interactions. Let's create a tbl with these extra features just in case another model can make better use of them.
 
 ``` {r dataWithInteractions}
 moreData <- trainDataDummies %>%
@@ -410,7 +426,7 @@ for (fold in 1:k) {
   trainDataVal <- trainData[kfInd == fold, ]
 
   ldaFit <- lda(
-    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se + clz, 
     data = trainDataFit)
   
   ldaPredict <- predict(ldaFit, newdata = trainDataVal)
@@ -447,7 +463,7 @@ for (fold in 1:k) {
   trainDataVal <- trainData[kfInd == fold, ]
 
   qdaFit <- qda(
-    yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+    yn ~ cg + fw + cl + hw + nc + ag + e2 + se + clz, 
     data = trainDataFit)
   
   qdaPredict <- predict(qdaFit, newdata = trainDataVal)
@@ -542,11 +558,11 @@ tune.out <- tune(svm, yn ~ ., data = smallSample,
 
 ```
 
-After running this a few times, a cost of 0.008 seems to be the consensus pick for the best.
-
 ``` {r tuneSVMSummary}
 summary(tune.out)
 ```
+
+After running this a few times, a cost of 0.8 seems to be the consensus pick for the best.
 
 ``` {r xvalSVM}
 k <- 10
@@ -722,13 +738,15 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
   geom_boxplot()
 ```
 
+Right out of the gate, it's easy to see how much poorer the lda and qda methods perform on this dataset. The overall accuracy of the logistic regressions, svm, and neural nets are all fairly similar, although the neural net is the only one of those three with higher sensitivity than specificity.
+
 In all, the random forest (without additional added parameters) is the best model, and what I'll choose to make my test set predictions on.
 
 ## Problem 6b: make predictions for the **test** dataset (3 points)
 
 > Decide on the model that performs the best and use it to make predictions for the **test** dataset.  This is the dataset that is provided separately from training data without the outcome `yn` that we are modeling here.  Upload resulting predictions in comma-separated values (CSV) format into the Canvas website.  Please check sample files with test dataset predictions for the expected format of the *.csv file with predictions.
 
-Before trying a prediction, let's take one last look at 
+Before trying a prediction, let's take one last look at the random forest using some additional data from the factor columns and interaction terms discovered using logistic regression methods.
 
 ``` {r tryRFM}
 rfFit <- randomForest(select(moreData, -yn), moreData$yn)
@@ -771,8 +789,6 @@ xvalResultsRFM %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
-It appears that the random forest without extra data still performs the best. With that settled, let's make some predictions.
-
 ``` {r compareBestXval}
 xvalResults <- bind_rows(
   xvalResultsLR,
@@ -787,6 +803,8 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = fct_reorder(model, value, .desc = TRUE), y = value, col = metric)) +
   geom_boxplot()
 ```
+
+It appears that the random forest without extra data still performs the best. With that settled, let's make some predictions.
 
 ``` {r loadTestData}
 rawTestData <- read_csv("final-data-test.csv") %>% mutate_if(is.character, as.factor)
