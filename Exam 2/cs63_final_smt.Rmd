@@ -36,6 +36,10 @@ It is 100% up to you whether you want to upload your model predictions over the 
 
 Lastly, the size of this dataset can make some of the modeling techniques run slower than what we were typically encountering in this class.  You may find it helpful to do some of the exploration and model tuning on multiple random samples of smaller size as you decide on useful ranges of parameters/modeling choices, and then only perform a final run of fully debugged and working code on the full dataset.  Please see also the afterword below on the computational demands of this problem set.
 
+# Problem 1: univariate and unsupervised analysis (20 points)
+
+Before we get started, I'm going to define a few useful functions for later.
+
 ``` {r metricFunctions}
 calcAcc <- function (cm) {
   sum(diag(cm)) / sum(cm)
@@ -55,13 +59,13 @@ calcSensitivity <- function (cm) {
 }
 ```
 
-# Problem 1: univariate and unsupervised analysis (20 points)
+> Download and read training and test data into R and prepare graphical and numerical summaries of it: e.g. histograms of continuous attributes, contingency tables of categorical variables, scatterplots of continuous attributes with some of the categorical variables indicated by color/symbol shape, etc.  Whatever you find helpful to think about properties of the data you are about to start using for fitting classification models.
 
-Download and read training and test data into R and prepare graphical and numerical summaries of it: e.g. histograms of continuous attributes, contingency tables of categorical variables, scatterplots of continuous attributes with some of the categorical variables indicated by color/symbol shape, etc.  Whatever you find helpful to think about properties of the data you are about to start using for fitting classification models.
+> As it is often the case for such contests, the atributes in the dataset are blinded in the sense that no information is available about what those are or what their values mean.  The only information available is that the attribute `yn` is the outcome to be modeled and the attribute `id` is the unique numerical identifier for each observation.  Some of the remaining attributes are clearly categorical (those that are character valued) and some rather obviously continuous (those with numerical values with large number of unique values).  For several of them it is less clear whether it is best to treat them as continuous or categorical -- e.g. their values are numerical but there are relatively few unique values with many observations taking the same value, so that they arguably could be treated as continuous or categorical.  Please idenify them, reflect on how you prefer to handle them and describe this in your own words.
 
-As it is often the case for such contests, the atributes in the dataset are blinded in the sense that no information is available about what those are or what their values mean.  The only information available is that the attribute `yn` is the outcome to be modeled and the attribute `id` is the unique numerical identifier for each observation.  Some of the remaining attributes are clearly categorical (those that are character valued) and some rather obviously continuous (those with numerical values with large number of unique values).  For several of them it is less clear whether it is best to treat them as continuous or categorical -- e.g. their values are numerical but there are relatively few unique values with many observations taking the same value, so that they arguably could be treated as continuous or categorical.  Please idenify them, reflect on how you prefer to handle them and describe this in your own words.
+> Perform principal components analysis of this data (do you need to scale it prior to that? how would you represent multilevel categorical attributes to be used as inputs for PCA?) and plot observations in the space of the first few principal components indicating levels of some of the categorical attributes of your choosing by the color/shape of the symbol.  Perform univariate assessment of associations between outcome we will be modeling and each of the attributes (e.g. t-test or logistic regression for continuous attributes, contingency tables/Fisher exact test/$\chi^2$ test for categorical attributes).  Summarize your observations from these assessments: does it appear that there are predictors associated with the outcome `yn` univariately? Which predictors seem to be more/less relevant?
 
-Perform principal components analysis of this data (do you need to scale it prior to that? how would you represent multilevel categorical attributes to be used as inputs for PCA?) and plot observations in the space of the first few principal components indicating levels of some of the categorical attributes of your choosing by the color/shape of the symbol.  Perform univariate assessment of associations between outcome we will be modeling and each of the attributes (e.g. t-test or logistic regression for continuous attributes, contingency tables/Fisher exact test/$\chi^2$ test for categorical attributes).  Summarize your observations from these assessments: does it appear that there are predictors associated with the outcome `yn` univariately? Which predictors seem to be more/less relevant?
+Okay, let's load in the dataset and take a look at what the data looks like.
 
 ``` {r loadData}
 rawData <- read_csv("final-data-train.csv") %>% mutate_if(is.character, as.factor)
@@ -72,16 +76,33 @@ head(rawData)
 summary(rawData)
 ```
 
-
 ``` {r numericPairsPlot}
-rawData %>% select_if(is.numeric) %>% select(-id) %>% pairs(col = c("black", "red")[rawData$yn])
+rawData %>% select_if(is.numeric) %>% select(-id) %>% pairs(col = rawData$yn)
 ```
 
-Columns ag and cg seem to have pretty good correlation to the target. Something interesting is happening in coumn cl, where many rows have value zero and non-zero quantities seem to be between 1 and about 1.7. It seems like column hw would benefit from log transformation. I don't think it would benefit from conversion to categorical though, there seems to be some amount of correlation between the value and the target.
+Columns ag and cg appear to have pretty good correlation to the target. Something interesting is happening in coumn cl, where many rows have value zero and non-zero quantities seem to be between 1 and about 1.7. It seems like column hw would benefit from log transformation. I don't think it would benefit from conversion to categorical though, there seems to be some amount of correlation between the value and the target.
+
+``` {r catContingencyTable}
+for (catRow in select_if(rawData, is.factor)) {
+  print(table(rawData$yn, catRow))
+}
+```
+
+First thing worth noting in the categorical features is that target no is about three times more common than a target yes. Feature se seems to have pretty good correlation and is only two levels. It seems also that most target no samples have eg of e2, which may be helpful. There may be some correlations with the other factors but it's difficult to tell with both the class imbalance and the higher number of factors.
+
+``` {r e2Cor}
+rawData %>% mutate(eg2 = eg == "e2", yn = yn == "yes") %>% select(yn, eg2) %>% cor()
+```
+
+It definitely appears that e2 can provide some value in predicting yn.
+
+In order to fix column cl, I'll use correlated features to fit a linear regression on the non-zero-valued samples of cl and predict values to replace the zero-valued samples.
 
 ``` {r clCor}
 rawData %>% select_if(is.numeric) %>% select(-id) %>% filter(cl != 0) %>% cor() %>% .[,"cl"]
 ```
+
+Looks like cg and ag are our best bet.
 
 ``` {r clFix}
 clLRFit <- glm(cl ~ cg + ag, data = filter(rawData, cl != 0))
@@ -91,14 +112,9 @@ summary(clLRFit)
 plot(clLRFit)
 ```
 
-``` {r catContingencyTable}
-for (catRow in select_if(rawData, is.factor)) {
-  print(table(rawData$yn, catRow))
-}
-```
+Not an incredible fit, but it will do better than all zeroes.
 
-First thing worth noting is that target no is about three times more common than a target yes. Feature se seems to have pretty good correlation and is only two levels. It seems also that most target no samples have eg of e2, which may be helpful. There may be some correlations with the other factors but it's difficult to tell with both the class imbalance and the higher number of factors.
-
+Now, I'll create logical features which flag when `eg = "e2"` and `cl == 0`, log-transform hw, and replace zero-valued cl samples with the above predicted values. I also create a tbl where the factor columns have been replaced with numeric dummy columns.
 
 ``` {r makeTrainData}
 trainData <- rawData %>%
@@ -113,14 +129,20 @@ trainDataDummies <- as.tibble(dummy.data.frame(as.data.frame(select(trainData, -
   bind_cols(select(trainData, yn))
 ```
 
+With that done, let's take a look at what a principal components analysis will look like on this data.
+
 ``` {r pca}
 pcaFit <- prcomp(select(trainDataDummies, -yn), scale. = TRUE)
 plot(pcaFit)
 ```
 
+The explained variance by each dimension does not drop off all that quickly. 
+
 ``` {r pcaPlot}
 biplot(pcaFit, pc.biplot = TRUE)
 ```
+
+In the first two dimensions, you see large vector components from wcpv, e2, wcxv, cl, and ag.
 
 ``` {r plotCategoriesWithPCA}
 factorColNames <- colnames(select_if(trainData, is.factor))
@@ -130,6 +152,10 @@ for (factorColName in factorColNames) {
   title(factorColName)
 }
 ```
+
+The data takes an interesting shape. There is definitely one large mass, and one much smaller mass of points. The small mass is all classified the same yn value. The larger mass also seems to be split into two attached masses.
+
+Let's try fitting some single variable logistic regressions on this data to get a sense for which numeric features have predictive power on their own.
 
 ``` {r xvalSingleVar}
 k <- 10
@@ -170,10 +196,20 @@ xvalResultsLRSV %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+Some, such as ag and cl, are actually fairly decent on their own. Several have very low sensitivity. Column nc is sort of middling. Let's see if a more complicated analysis can provide a better result.
+
 
 # Problem 2: logistic regression (20 points)
 
-Develop logistic regression model of the outcome `yn` as a function of multiple predictors in the model.  Which variables are significantly associated with the outcome?  Test model performance on multiple splits of data into training and test subsets and summarize it in terms of accuracy/error/sensitivity/specificity.
+> Develop logistic regression model of the outcome `yn` as a function of multiple predictors in the model.  Which variables are significantly associated with the outcome?  Test model performance on multiple splits of data into training and test subsets and summarize it in terms of accuracy/error/sensitivity/specificity.
+
+``` {r testNumericCorrelationOnYn}
+trainData %>% 
+  select_if(is.numeric) %>% select(-id) %>% cbind(yn = as.numeric(trainData$yn)) %>% 
+  cor() %>% .["yn", ] %>% sort(decreasing = TRUE)
+```
+
+Decent correlation with yn and features cg, ag, and nc. 
 
 ``` {r testNumericCorrelation}
 trainData %>% 
@@ -181,7 +217,9 @@ trainData %>%
   cor()
 ```
 
-Decent correlation with yn and features cg, ag, and nc. Some of these features are also fairly well correlated with each other, especially cg and ag.
+Some of these features are also fairly well correlated with each other, especially cg and ag.
+
+Let's try our luck and use all of the numeric and logical features.
 
 ``` {r fitSingleLR}
 lrFit <- glm(
@@ -222,10 +260,14 @@ xvalResultsLR %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+This logistic regression performs surprisingly well, scoring around a 90% validation accuracy with similar levels of sensitivity and specificity. 
+
 
 ## Extra points problem: interaction terms (5 extra points)
 
-Assess the impact/significance of pairwise interaction terms for all pairwise combinations of covariates used in the model and report the top ten that most significantly improve model fit.
+> Assess the impact/significance of pairwise interaction terms for all pairwise combinations of covariates used in the model and report the top ten that most significantly improve model fit.
+
+In order to assess the value of interaction terms in general, let's look at what a logistic regression fit looks like using all features and all interaction terms.
 
 ``` {r generateInteractionTerms}
 numSubsetData <- bind_cols(
@@ -236,6 +278,8 @@ numSubsetData <- bind_cols(
 lmFit <- glm(yn ~ . + .*., data = numSubsetData, family = binomial)
 summary(lmFit)
 ```
+
+Several have high predictive power. Using feature selection methods, which ones should we pick?
 
 ```{r predictRegsubsets}
 # taken from homework 5, which was in turn taken from ISLR lab 6.5.3
@@ -287,8 +331,8 @@ ggplot(selectMetricsInteract, aes(x = vars,y = value,shape = method,colour = met
 
 ``` {r interactPlotSelectedVars}
 plotWhich <- selectWhichInteract %>% 
-  gather(key = param, value = selected, -c(method, vars))
-ggplot(plotWhich, aes(x = vars, y = param, fill = selected)) + 
+  gather(key = param, value = selected, -c(method, vars)) %>%
+  ggplot(aes(x = vars, y = param, fill = selected)) + 
   geom_tile() + 
   facet_wrap(~method)
 ```
@@ -305,7 +349,7 @@ selectWhichInteract %>%
 
 ``` {r fitSingleIntLR}
 lrFit <- glm(
-  yn ~ cg + fw + cl + hw + nc + ag + e2 + se + cl*nc + cg*ag + cl*ag, 
+  yn ~ cg + nc + cl*nc + hw + cl + cg*ag + cl*ag + ag + cg*hw + e2 + clz, 
   data = trainData, family = binomial)
 
 summary(lrFit)
@@ -321,7 +365,7 @@ for (fold in 1:k) {
   trainDataVal <- trainData[kfInd == fold, ]
 
   lrFit <- glm(
-    yn ~ cg + fw + cl + hw + nc + ag + e2 + se + clz + cl*nc + cg*ag + cl*ag, 
+    yn ~ cg + nc + cl*nc + hw + cl + cg*ag + cl*ag + ag + e2 + clz, 
     data = trainDataFit, family = binomial)
   
   lrPredict <- predict(lrFit, newdata = trainDataVal, type = "response")
@@ -347,13 +391,14 @@ moreData <- trainDataDummies %>%
   mutate(
     clnc = cl * nc,
     cgag = cg * ag,
-    clag = cl * ag
+    clag = cl * ag, 
+    cghw = cg * hw
   )
 ```
 
 # Problem 3: linear discriminant analysis (15 points)
 
-Fit linear discriminant analysis model of the outcome `yn` as a function of the rest of covariates in the dataset.  Feel free to decide whether you want to use all of them or a subset of those.  Test resulting model performance on multiple splits of the data into training and test subsets, summarize it in terms of accuracy/error/sensitivity/specificity and compare them to those obtained for logistic regression.
+> Fit linear discriminant analysis model of the outcome `yn` as a function of the rest of covariates in the dataset.  Feel free to decide whether you want to use all of them or a subset of those.  Test resulting model performance on multiple splits of the data into training and test subsets, summarize it in terms of accuracy/error/sensitivity/specificity and compare them to those obtained for logistic regression.
 
 ``` {r xvalLDA}
 k <- 10
@@ -386,9 +431,11 @@ xvalResultsLDA %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+LDA performs poorly in comparison to other classification methods on this dataset. The sensitivity especially is very low.
+
 ## Extra points problem: quadratic discriminant analysis (5 extra points)
 
-In our experience attempting to fit quadratic discriminant analysis model of the categorical outcome `yn` on this data results in a rank deficiency related error. Determine on how to correct this error and report resulting model training and test error/accuracy/etc. and how it compares to LDA and logistic regression above. 
+> In our experience attempting to fit quadratic discriminant analysis model of the categorical outcome `yn` on this data results in a rank deficiency related error. Determine on how to correct this error and report resulting model training and test error/accuracy/etc. and how it compares to LDA and logistic regression above. 
 
 ``` {r xvalQDA}
 k <- 10
@@ -421,19 +468,28 @@ xvalResultsQDA %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+QDA performs better than LDA, but not by much.
+
 # Problem 4: random forest (15 points)
 
-Develop random forest model of outcome `yn`. Present variable importance plots and comment on relative importance of different attributes in the model.  Did attributes showing up as more important in random forest model also appear as significantly associated with the outcome by logistic regression?  Test model performance on multiple splits of data into training and test subsets, compare test and out-of-bag error estimates, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of logistic regression and LDA models above.
+> Develop random forest model of outcome `yn`. Present variable importance plots and comment on relative importance of different attributes in the model.  Did attributes showing up as more important in random forest model also appear as significantly associated with the outcome by logistic regression?  Test model performance on multiple splits of data into training and test subsets, compare test and out-of-bag error estimates, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of logistic regression and LDA models above.
+
+Let's try fitting one on a sampled dataset first to see what the important features are.
 
 ``` {r tryRF}
-rfFit <- randomForest(select(trainData, -yn), trainData$yn)
+smallSample <- trainData[sample(1:nrow(trainData), nrow(trainData) / 10, replace = TRUE), ]
+
+rfFit <- randomForest(select(smallSample, -yn), smallSample$yn)
 ```
 
 ``` {r plotTopRFVars}
-rfFit$importance %>% as.tibble(rownames = "feature") %>%
+rfFit$importance %>% as.tibble(rownames = "feature") %>% 
+  arrange(desc(MeanDecreaseGini)) %>% head(15) %>%
   ggplot(aes(x = fct_reorder(feature, MeanDecreaseGini, .desc = TRUE), y = MeanDecreaseGini)) + 
   geom_col()
 ```
+
+By far the most important feature was cg. After that, e2, eg, ag, oc, cl, se, ... etc, are also selected as important features.
 
 ``` {r xvalRF}
 k <- 10
@@ -464,19 +520,29 @@ xvalResultsRF %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+The random forest performs very well. Higher than 92% accuracy with slightly better sensitivity than specificity.
+
 # Problem 5: SVM (20 points)
 
-Develop SVM model of categorical outcome `yn` deciding on the choice of kernel, cost, etc. that appear to yield better performance.  Test model performance on multiple splits of data into training and test subsets, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of the rest of the models developed above (logistic regression, LDA, random forest).
+> Develop SVM model of categorical outcome `yn` deciding on the choice of kernel, cost, etc. that appear to yield better performance.  Test model performance on multiple splits of data into training and test subsets, summarize model performance in terms of accuracy/error/sensitivity/specificity and compare to the performance of the rest of the models developed above (logistic regression, LDA, random forest).
+
+I'll just use a small subset of the data to tune the svm parameters.
 
 ``` {r tuneSVM}
-costs <- c(1, 3, 5) #c(0.1, 0.3, 0.5, 1, 3, 10, 30, 100)
-#gammas <- c(0.01, 0.1) #c(0.01, 0.02, 0.05, 0.1, 0.2)
+smallSample <- trainData[sample(1:nrow(trainDataDummies), nrow(trainDataDummies) / 10, replace = TRUE), ]
+smallSample <- smallSample %>% select_if(negate(is.factor)) %>% 
+  bind_cols(smallSample %>% select(yn)) %>% select(-id)
+# smallSample <- smallSample[, colSums(smallSample %>% select_if(is.numeric)) != 0]
 
-tune.out <- tune(svm, yn ~ cg + fw + cl + hw + nc + ag + e2 + se, data = trainData, 
+costs <- c(0.3, 0.5, 0.8, 1)
+
+tune.out <- tune(svm, yn ~ ., data = smallSample, 
                  kernel = "linear", scale = TRUE, 
                  ranges = list(cost = costs))
 
 ```
+
+After running this a few times, a cost of 0.008 seems to be the consensus pick for the best.
 
 ``` {r tuneSVMSummary}
 summary(tune.out)
@@ -488,12 +554,16 @@ kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
 xvalResultsSVM <- tibble()
 
 for (fold in 1:k) {
-  trainDataFit <- trainData[kfInd != fold, ]
-  trainDataVal <- trainData[kfInd == fold, ]
+  trainDataFit <- trainData[kfInd != fold, ] %>% 
+    select_if(negate(is.factor)) %>% 
+    bind_cols(trainData[kfInd != fold, ] %>% select(yn)) %>% select(-id)
+  trainDataVal <- trainData[kfInd == fold, ] %>% mutate(yn = as.numeric(yn) - 1) %>% 
+    select_if(negate(is.factor)) %>%
+    bind_cols(trainData[kfInd == fold, ] %>% select(yn)) %>% select(-id)
 
-  svmFit <- svm(yn ~ cg + fw + cl + hw + nc + ag + e2 + se, 
+  svmFit <- svm(yn ~ ., 
                 data = trainDataFit, kernel = "linear", scale = TRUE,
-                cost = 3)
+                cost = 0.8)
   
   svmPredict <- predict(svmFit, trainDataVal)
   svmCM <- table(trainDataVal$yn, svmPredict)
@@ -513,9 +583,13 @@ xvalResultsSVM %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+The SVM appears to perform well, but still not as well as the random forest.
+
 # Extra 10 points: neural network model
 
-Experiment with fitting neural network models of categorical outcome `yn` for this data and evaluate their performance on different splits of the data into training and test. Compare model performance to that for the rest of classifiers developed above.
+> Experiment with fitting neural network models of categorical outcome `yn` for this data and evaluate their performance on different splits of the data into training and test. Compare model performance to that for the rest of classifiers developed above.
+
+I think the neuralnet package is a bit of a joke so I used the keras interface for R instead. First, because the classes are imbalanced, I'll sample from the "yes" rows to ensure there's an equal number of samples with each target response.
 
 ``` {r resampleData}
 yesRows <- moreData %>% filter(yn == "yes") 
@@ -529,6 +603,8 @@ resampData <- yesRows %>%
 resampData %>% count(ynn)
 ```
 
+After playing around for a bit, I settled on this model structure. Although to be fair, changing parameters only affects the accuracy really at the margins.
+
 ``` {r buildNeuralNet}
 model <- keras_model_sequential()
 model %>% 
@@ -540,6 +616,8 @@ model %>%
 
 summary(model)
 ```
+
+It's a binary classification problem, so I'm using a sigmoid activation function on the final neuron, binary crossentropy as my loss function and the adam optimizer.
 
 ``` {r tryNeuralNet}
 model %>% compile(
@@ -602,6 +680,8 @@ xvalResultsNN %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
+The results are pretty good. Fairly high sensitivity, which some regularization could help with.
+
 ``` {r compareXvalToNN}
 xvalResults <- bind_rows(
   xvalResultsLR,
@@ -618,11 +698,13 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
   geom_boxplot()
 ```
 
+In comparison with other methods, it falls a little bit short. Logistic regression, linear basis SVM, and random forest all have higher cross-validated test accuracy.
+
 # Problem 6: predictions for test dataset  (10 points)
 
 ## Problem 6a: compare logistic regression, LDA, random forest and SVM model performance (3 points)
 
-Compare performance of the models developed above (logistic regression, LDA, random forest, SVM) in terms of their accuracy, error and sensitivity/specificity.  Comment on differences and similarities between them.
+> Compare performance of the models developed above (logistic regression, LDA, random forest, SVM) in terms of their accuracy, error and sensitivity/specificity.  Comment on differences and similarities between them.
 
 ``` {r compareXval}
 xvalResults <- bind_rows(
@@ -640,9 +722,13 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
   geom_boxplot()
 ```
 
+In all, the random forest (without additional added parameters) is the best model, and what I'll choose to make my test set predictions on.
+
 ## Problem 6b: make predictions for the **test** dataset (3 points)
 
-Decide on the model that performs the best and use it to make predictions for the **test** dataset.  This is the dataset that is provided separately from training data without the outcome `yn` that we are modeling here.  Upload resulting predictions in comma-separated values (CSV) format into the Canvas website.  Please check sample files with test dataset predictions for the expected format of the *.csv file with predictions.
+> Decide on the model that performs the best and use it to make predictions for the **test** dataset.  This is the dataset that is provided separately from training data without the outcome `yn` that we are modeling here.  Upload resulting predictions in comma-separated values (CSV) format into the Canvas website.  Please check sample files with test dataset predictions for the expected format of the *.csv file with predictions.
+
+Before trying a prediction, let's take one last look at 
 
 ``` {r tryRFM}
 rfFit <- randomForest(select(moreData, -yn), moreData$yn)
@@ -685,7 +771,7 @@ xvalResultsRFM %>% gather(key = metric, value = value, -c(fold, model)) %>%
   ggplot(aes(x = model, y = value, col = metric)) + geom_boxplot()
 ```
 
-
+It appears that the random forest without extra data still performs the best. With that settled, let's make some predictions.
 
 ``` {r compareBestXval}
 xvalResults <- bind_rows(
@@ -702,24 +788,46 @@ xvalResults %>% gather(key = metric, value = value, -c(fold, model)) %>%
   geom_boxplot()
 ```
 
+``` {r loadTestData}
+rawTestData <- read_csv("final-data-test.csv") %>% mutate_if(is.character, as.factor)
 
+newcl <- predict(clLRFit, newdata = filter(rawTestData, cl == 0))
+
+testData <- rawTestData %>%
+  mutate(
+    e2 = eg == "e2",
+    clz = cl == 0,
+    hw = log(hw + 1e-6)
+    )
+testData[testData$cl == 0, "cl"] <- newcl
+
+testDataDummies <- as.tibble(dummy.data.frame(as.data.frame(testData, -yn)))
+```
+
+``` {r predictTestSet}
+rfFit <- randomForest(select(trainData, -yn), trainData$yn)
+rfPredict <- predict(rfFit, newdata = testData)
+
+submission <- testData %>% select(id) %>% mutate(GenghisKhan = rfPredict)
+submission %>% write_csv("cs63_final_results.csv")
+```
 
 
 ## Problem 6c: get better than coin flip by 10% (4 points)
 
-This is not really a problem *per se* but rather a criterion we will go by assessing quality of your predictions for the test dataset.  You get these four points if your predictions for **test** dataset are better than those obtained from a fair coin flip (already shown in leaderboard and as examples of the file format for predictions upload) by at least 10% on **all** four metrics shown in the leaderboard (accuracy, sensitivity, specificity and precision).  But then predictions by the coin flip should not be very difficult to improve upon.  
+> This is not really a problem *per se* but rather a criterion we will go by assessing quality of your predictions for the test dataset.  You get these four points if your predictions for **test** dataset are better than those obtained from a fair coin flip (already shown in leaderboard and as examples of the file format for predictions upload) by at least 10% on **all** four metrics shown in the leaderboard (accuracy, sensitivity, specificity and precision).  But then predictions by the coin flip should not be very difficult to improve upon.  
 
 
 # An afterword on the computational demands of the final exam
 
-Because during previous offerings of this course there were always several posts on piazza regarding how long it takes to fit various classifiers to the final exam dataset we have added this note here.
+> Because during previous offerings of this course there were always several posts on piazza regarding how long it takes to fit various classifiers to the final exam dataset we have added this note here.
 
-First of all, we most definitely do *not* expect you to *have* to buy capacity from AWS to complete this assignment. You certainly can if you want to, but this course is not about that and this dataset is really not *that* big to require it. Something reasonable/useful can be accomplished for this data with middle of the road hardware. For instance, knitting of the entire official solution for the final exam on 8Gb RAM machine with two i5-7200u cores takes about an hour using single-threaded R/Rstudio and this includes both extra points problems as well as various assessments of the performance of different models as function of data size and so on.
+> First of all, we most definitely do *not* expect you to *have* to buy capacity from AWS to complete this assignment. You certainly can if you want to, but this course is not about that and this dataset is really not *that* big to require it. Something reasonable/useful can be accomplished for this data with middle of the road hardware. For instance, knitting of the entire official solution for the final exam on 8Gb RAM machine with two i5-7200u cores takes about an hour using single-threaded R/Rstudio and this includes both extra points problems as well as various assessments of the performance of different models as function of data size and so on.
 
-Second, your solution should not take hours and hours to compile. If it does, it could be that it is attempting to do too much, or something is implemented inefficiently, or just plain incorrectly - it is impossible for us to comment on this until we see the code when we grade it. In general, it is often very prudent to "start small" -- fit your model on a random subset of data small enough for the model fitting call to return immediately, check how model performance (both in terms of error and time it takes to compute) scales with the size of the data you are training it on (as you increase it in size, say, two-fold several times), for tuning start with very coarse grid of parameter values and given those results decide what it right for you, etc.
+> Second, your solution should not take hours and hours to compile. If it does, it could be that it is attempting to do too much, or something is implemented inefficiently, or just plain incorrectly - it is impossible for us to comment on this until we see the code when we grade it. In general, it is often very prudent to "start small" -- fit your model on a random subset of data small enough for the model fitting call to return immediately, check how model performance (both in terms of error and time it takes to compute) scales with the size of the data you are training it on (as you increase it in size, say, two-fold several times), for tuning start with very coarse grid of parameter values and given those results decide what it right for you, etc.
 
-Lastly, making the decision about what is right for the problem at hand, how much is enough, etc. is inherent in this line of work. If you choose to conduct model tuning on a subset of the data - especially if you have some assessment of how the choice of tuning parameter and test error is affected by the size of training dataset - it could be a very wise choice.  If it is more efficient for you to knit each problem separately, by all means feel free to do that - just remember to submit each .Rmd and HTML file that comprises your entire solution. On that note, if you end up using any of the unorthodox setups for your calculations (e.g. AWS, parallel processing, multiple machines, etc. - none of which are essential for solving it correctly) please be sure that when we grade we have every relevant piece of code available - we won't be able to grade your work if we are not clear about how the results were obtained.
+> Lastly, making the decision about what is right for the problem at hand, how much is enough, etc. is inherent in this line of work. If you choose to conduct model tuning on a subset of the data - especially if you have some assessment of how the choice of tuning parameter and test error is affected by the size of training dataset - it could be a very wise choice.  If it is more efficient for you to knit each problem separately, by all means feel free to do that - just remember to submit each .Rmd and HTML file that comprises your entire solution. On that note, if you end up using any of the unorthodox setups for your calculations (e.g. AWS, parallel processing, multiple machines, etc. - none of which are essential for solving it correctly) please be sure that when we grade we have every relevant piece of code available - we won't be able to grade your work if we are not clear about how the results were obtained.
 
-In the end, the final exam asks you to assess performance of several classification technologies on a new dataset, decide on which classifier is the best and use it to make predictions for the test data. It is very much up to you how exactly you want to go about it.  There could be many versions of correct and informative solution for that (as there could be just as many if not more that are completely wrong).
+> In the end, the final exam asks you to assess performance of several classification technologies on a new dataset, decide on which classifier is the best and use it to make predictions for the test data. It is very much up to you how exactly you want to go about it.  There could be many versions of correct and informative solution for that (as there could be just as many if not more that are completely wrong).
 
-As always, best of luck - we are practically done here!
+> As always, best of luck - we are practically done here!
