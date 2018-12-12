@@ -127,7 +127,7 @@ Now, I'll create logical features which flag when `eg = "e2"` and `se == "vrm"` 
 trainData <- rawData %>%
   mutate(
     e2 = eg == "e2",
-    sev = se == "vrm"
+    sev = se == "vrm",
     clz = cl == 0,
     hw = log(hw + 1e-6)
     )
@@ -814,6 +814,7 @@ newcl <- predict(clLRFit, newdata = filter(rawTestData, cl == 0))
 testData <- rawTestData %>%
   mutate(
     e2 = eg == "e2",
+    sev = se == "vrm",
     clz = cl == 0,
     hw = log(hw + 1e-6)
     )
