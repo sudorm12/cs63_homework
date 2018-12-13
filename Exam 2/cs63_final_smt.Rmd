@@ -507,6 +507,14 @@ rfFit$importance %>% as.tibble(rownames = "feature") %>%
 
 By far the most important feature was cg. After that, e2, eg, ag, oc, cl, se, ... etc, are also selected as important features.
 
+``` {r tuneRF}
+smallSample <- trainData[sample(1:nrow(trainData), nrow(trainData) / 2, replace = TRUE), ]
+
+tune.rf <- tuneRF(select(smallSample, -yn), smallSample$yn, improve = 0, stepFactor = 1.5)
+```
+
+It appears, based on running this a number of times, that the optimal mtry is somewhere between 6 and 9. Let's call it 8.
+
 ``` {r xvalRF}
 k <- 10
 kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
@@ -516,7 +524,7 @@ for (fold in 1:k) {
   trainDataFit <- trainData[kfInd != fold, ]
   trainDataVal <- trainData[kfInd == fold, ]
 
-  rfFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn)
+  rfFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn, mtry = 8)
   
   rfPredict <- predict(rfFit, newdata = select(trainDataVal, -yn))
   rfCM <- table(trainDataVal$yn, rfPredict)
@@ -752,6 +760,13 @@ Before trying a prediction, let's take one last look at the random forest using 
 rfFit <- randomForest(select(moreData, -yn), moreData$yn)
 ```
 
+``` {r tuneRFM}
+smallSample <- moreData[sample(1:nrow(moreData), nrow(moreData) / 5, replace = TRUE), ]
+
+tune.rf <- tuneRF(select(smallSample, -yn), smallSample$yn, 
+                  mtryStart = 14, improve = 0, stepFactor = 1.5)
+```
+
 ``` {r plotTopRFMVars}
 rfFit$importance %>% as.tibble(rownames = "feature") %>% 
   arrange(desc(MeanDecreaseGini)) %>%
@@ -769,7 +784,7 @@ for (fold in 1:k) {
   trainDataFit <- moreData[kfInd != fold, ]
   trainDataVal <- moreData[kfInd == fold, ]
 
-  rfmFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn)
+  rfmFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn, mtry = 14)
   
   rfmPredict <- predict(rfmFit, newdata = select(trainDataVal, -yn))
   rfmCM <- table(trainDataVal$yn, rfmPredict)
