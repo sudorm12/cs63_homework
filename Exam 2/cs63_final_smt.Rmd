@@ -521,8 +521,8 @@ kfInd <- sample(rep(c(1:k),length.out=nrow(trainData)))
 xvalResultsRF <- tibble()
 
 for (fold in 1:k) {
-  trainDataFit <- trainData[kfInd != fold, ]
-  trainDataVal <- trainData[kfInd == fold, ]
+  trainDataFit <- trainData[kfInd != fold, ] %>% select(-id)
+  trainDataVal <- trainData[kfInd == fold, ] %>% select(-id)
 
   rfFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn, mtry = 8)
   
@@ -764,7 +764,7 @@ rfFit <- randomForest(select(moreData, -yn), moreData$yn)
 smallSample <- moreData[sample(1:nrow(moreData), nrow(moreData) / 5, replace = TRUE), ]
 
 tune.rf <- tuneRF(select(smallSample, -yn), smallSample$yn, 
-                  mtryStart = 14, improve = 0, stepFactor = 1.5)
+                  mtryStart = 30, improve = 0, stepFactor = 1.5)
 ```
 
 ``` {r plotTopRFMVars}
@@ -784,7 +784,7 @@ for (fold in 1:k) {
   trainDataFit <- moreData[kfInd != fold, ]
   trainDataVal <- moreData[kfInd == fold, ]
 
-  rfmFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn, mtry = 14)
+  rfmFit <- randomForest(select(trainDataFit, -yn), trainDataFit$yn, mtry = 30)
   
   rfmPredict <- predict(rfmFit, newdata = select(trainDataVal, -yn))
   rfmCM <- table(trainDataVal$yn, rfmPredict)
@@ -839,7 +839,7 @@ testDataDummies <- as.tibble(dummy.data.frame(as.data.frame(testData, -yn)))
 ```
 
 ``` {r predictTestSet}
-rfFit <- randomForest(select(trainData, -yn), trainData$yn)
+rfFit <- randomForest(select(trainData, -yn), trainData$yn, mtry = 8)
 rfPredict <- predict(rfFit, newdata = testData)
 
 submission <- testData %>% select(id) %>% mutate(GenghisKhan = rfPredict)
